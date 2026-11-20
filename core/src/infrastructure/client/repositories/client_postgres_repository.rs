@@ -264,7 +264,7 @@ impl ClientRepository for PostgresClientRepository {
             maintenance_enabled: Set(Some(false)),
             maintenance_reason: Set(None),
             maintenance_session_strategy: Set(None),
-            require_pkce: Set(Some(data.require_pkce)),
+            require_pkce: Set(data.require_pkce),
             require_pushed_authorization_requests: Set(false),
             token_exchange_enabled: Set(data.token_exchange_enabled),
             backchannel_logout_uri: Set(None),
@@ -433,7 +433,7 @@ impl ClientRepository for PostgresClientRepository {
         };
 
         client.require_pkce = match data.require_pkce {
-            Some(v) => Set(Some(v)),
+            Some(v) => Set(v),
             None => client.require_pkce,
         };
 
