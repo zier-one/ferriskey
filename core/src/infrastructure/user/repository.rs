@@ -1,9 +1,9 @@
 use chrono::{DateTime, FixedOffset, Utc};
 use sea_orm::ExprTrait;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait,
-    DatabaseConnection, DbBackend, DbErr, EntityTrait, ModelTrait, QueryFilter, QuerySelect,
-    QueryTrait, Select, SqlErr, Statement, UpdateMany, sea_query::Expr,
+    ActiveModelTrait, ActiveValue::Set, Condition, ConnectionTrait, DatabaseConnection, DbBackend,
+    DbErr, EntityTrait, ModelTrait, QueryFilter, QuerySelect, QueryTrait, Select, SqlErr,
+    Statement, UpdateMany, sea_query::Expr,
 };
 use tracing::{error, instrument};
 use uuid::Uuid;
@@ -39,76 +39,80 @@ impl SortColumn<users::Entity> for UserSortField {
 
 fn search(value: &str) -> Condition {
     Condition::any()
-        .add(contains(users::Column::Username, value))
-        .add(contains(users::Column::Email, value))
-        .add(contains(users::Column::Firstname, value))
-        .add(contains(users::Column::Lastname, value))
+        .add(contains(users::COLUMN.username, value))
+        .add(contains(users::COLUMN.email, value))
+        .add(contains(users::COLUMN.firstname, value))
+        .add(contains(users::COLUMN.lastname, value))
 }
 
 fn listing_select(realm_id: Uuid, filter: &UserFilter) -> Select<users::Entity> {
     users::Entity::find()
-        .filter(users::Column::RealmId.eq(realm_id))
-        .filter(within_naive(users::Column::CreatedAt, &filter.created))
+        .filter(users::COLUMN.realm_id.eq(realm_id))
+        .filter(within_naive(users::COLUMN.created_at, &filter.created))
         .apply_if(filter.search.as_deref(), |select, value| {
             select.filter(search(value))
         })
         .apply_if(filter.username.as_deref(), |select, value| {
-            select.filter(contains(users::Column::Username, value))
+            select.filter(contains(users::COLUMN.username, value))
         })
         .apply_if(filter.email.as_deref(), |select, value| {
-            select.filter(contains(users::Column::Email, value))
+            select.filter(contains(users::COLUMN.email, value))
         })
         .apply_if(filter.firstname.as_deref(), |select, value| {
-            select.filter(contains(users::Column::Firstname, value))
+            select.filter(contains(users::COLUMN.firstname, value))
         })
         .apply_if(filter.lastname.as_deref(), |select, value| {
-            select.filter(contains(users::Column::Lastname, value))
+            select.filter(contains(users::COLUMN.lastname, value))
         })
         .apply_if(filter.enabled, |select, value| {
-            select.filter(users::Column::Enabled.eq(value))
+            select.filter(users::COLUMN.enabled.eq(value))
         })
         .apply_if(filter.email_verified, |select, value| {
-            select.filter(users::Column::EmailVerified.eq(value))
+            select.filter(users::COLUMN.email_verified.eq(value))
         })
         .apply_if(filter.service_account, |select, value| {
             select.filter(if value {
-                users::Column::ClientId.is_not_null()
+                users::COLUMN.client_id.is_not_null()
             } else {
-                users::Column::ClientId.is_null()
+                users::COLUMN.client_id.is_null()
             })
         })
         .apply_if(filter.ids.as_deref(), |select, ids| {
-            select.filter(users::Column::Id.is_in(ids.iter().copied()))
+            select.filter(users::COLUMN.id.is_in(ids.iter().copied()))
         })
         .apply_if(filter.role_id, |select, role_id| {
             select.filter(
-                users::Column::Id.in_subquery(
+                users::COLUMN.id.in_subquery(
                     user_role::Entity::find()
                         .select_only()
                         .column(user_role::Column::UserId)
-                        .filter(user_role::Column::RoleId.eq(role_id))
+                        .filter(user_role::COLUMN.role_id.eq(role_id))
                         .into_query(),
                 ),
             )
         })
         .apply_if(filter.not_in_group, |select, group_id| {
             select.filter(
-                users::Column::Id.not_in_subquery(
+                users::COLUMN.id.not_in_subquery(
                     organization_group_members::Entity::find()
                         .select_only()
                         .column(organization_group_members::Column::UserId)
-                        .filter(organization_group_members::Column::GroupId.eq(group_id))
+                        .filter(organization_group_members::COLUMN.group_id.eq(group_id))
                         .into_query(),
                 ),
             )
         })
         .apply_if(filter.not_in_organization, |select, organization_id| {
             select.filter(
-                users::Column::Id.not_in_subquery(
+                users::COLUMN.id.not_in_subquery(
                     organization_members::Entity::find()
                         .select_only()
                         .column(organization_members::Column::UserId)
-                        .filter(organization_members::Column::OrganizationId.eq(organization_id))
+                        .filter(
+                            organization_members::COLUMN
+                                .organization_id
+                                .eq(organization_id),
+                        )
                         .into_query(),
                 ),
             )
@@ -154,16 +158,16 @@ fn classify_user_unique_violation(err: &DbErr) -> Option<UserUniqueViolation> {
 
 fn reset_lockout_update(user_id: Uuid) -> UpdateMany<users::Entity> {
     users::Entity::update_many()
-        .col_expr(users::Column::FailedLoginAttempts, Expr::value(0))
+        .col_expr(users::COLUMN.failed_login_attempts, Expr::value(0))
         .col_expr(
-            users::Column::LockedUntil,
+            users::COLUMN.locked_until,
             Expr::value(None::<DateTime<FixedOffset>>),
         )
-        .filter(users::Column::Id.eq(user_id))
+        .filter(users::COLUMN.id.eq(user_id))
         .filter(
             Condition::any()
-                .add(users::Column::FailedLoginAttempts.ne(0))
-                .add(users::Column::LockedUntil.is_not_null()),
+                .add(users::COLUMN.failed_login_attempts.ne(0))
+                .add(users::COLUMN.locked_until.is_not_null()),
         )
 }
 
@@ -274,11 +278,11 @@ impl UserRepository for PostgresUserRepository {
         let found = crate::entity::users::Entity::find()
             .filter(
                 sea_orm::sea_query::Expr::expr(sea_orm::sea_query::Func::lower(
-                    sea_orm::sea_query::Expr::col(crate::entity::users::Column::Username),
+                    sea_orm::sea_query::Expr::col(users::COLUMN.username),
                 ))
                 .eq(username.trim().to_lowercase()),
             )
-            .filter(crate::entity::users::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(users::COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .find_with_related(crate::entity::user_required_actions::Entity)
             .all(&self.db)
             .await
@@ -307,7 +311,7 @@ impl UserRepository for PostgresUserRepository {
     #[instrument]
     async fn get_by_client_id(&self, client_id: Uuid) -> Result<Unscoped<User>, CoreError> {
         let user = crate::entity::users::Entity::find()
-            .filter(crate::entity::users::Column::ClientId.eq(client_id))
+            .filter(users::COLUMN.client_id.eq(client_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -322,7 +326,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn get_by_id(&self, id: Uuid) -> Result<Unscoped<User>, CoreError> {
         let users_model = crate::entity::users::Entity::find()
-            .filter(crate::entity::users::Column::Id.eq(id))
+            .filter(users::COLUMN.id.eq(id))
             .find_also_related(crate::entity::realms::Entity)
             .all(&self.db)
             .await
@@ -385,11 +389,11 @@ impl UserRepository for PostgresUserRepository {
         let found = crate::entity::users::Entity::find()
             .filter(
                 sea_orm::sea_query::Expr::expr(sea_orm::sea_query::Func::lower(
-                    sea_orm::sea_query::Expr::col(crate::entity::users::Column::Email),
+                    sea_orm::sea_query::Expr::col(users::COLUMN.email),
                 ))
                 .eq(email.trim().to_lowercase()),
             )
-            .filter(crate::entity::users::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(users::COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .find_with_related(crate::entity::user_required_actions::Entity)
             .all(&self.db)
             .await
@@ -409,9 +413,9 @@ impl UserRepository for PostgresUserRepository {
         let rows = crate::entity::users::Entity::delete_many()
             .filter(
                 Condition::all()
-                    .add(crate::entity::users::Column::Id.is_in(ids.clone()))
-                    .add(crate::entity::users::Column::ClientId.is_null())
-                    .add(crate::entity::users::Column::RealmId.eq(Uuid::from(realm_id))),
+                    .add(users::COLUMN.id.is_in(ids.clone()))
+                    .add(users::COLUMN.client_id.is_null())
+                    .add(users::COLUMN.realm_id.eq(Uuid::from(realm_id))),
             )
             .exec(&self.db)
             .await
@@ -438,7 +442,7 @@ impl UserRepository for PostgresUserRepository {
         dto: UpdateUserRequest,
     ) -> Result<User, CoreError> {
         let user = crate::entity::users::Entity::find()
-            .filter(crate::entity::users::Column::Id.eq(user.get().id))
+            .filter(users::COLUMN.id.eq(user.get().id))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::NotFound)?;
@@ -478,7 +482,7 @@ impl UserRepository for PostgresUserRepository {
         locale: Option<String>,
     ) -> Result<User, CoreError> {
         let user = crate::entity::users::Entity::find()
-            .filter(crate::entity::users::Column::Id.eq(user.get().id))
+            .filter(users::COLUMN.id.eq(user.get().id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -548,7 +552,7 @@ impl UserRepository for PostgresUserRepository {
     #[instrument(skip(self), err)]
     async fn unlock_user(&self, user: &Scoped<User>) -> Result<(), CoreError> {
         let user = crate::entity::users::Entity::find()
-            .filter(crate::entity::users::Column::Id.eq(user.get().id))
+            .filter(users::COLUMN.id.eq(user.get().id))
             .one(&self.db)
             .await
             .map_err(|e| {

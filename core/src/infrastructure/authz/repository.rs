@@ -17,8 +17,8 @@ use ferriskey_domain::common::app_errors::{CoreError, PolicyIssue};
 use ferriskey_domain::realm::scope::RealmScope;
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DbErr,
-    EntityTrait, QueryFilter, SqlErr, TransactionTrait,
+    ActiveValue::Set, Condition, ConnectionTrait, DatabaseConnection, DbErr, EntityTrait,
+    QueryFilter, SqlErr, TransactionTrait,
 };
 use tracing::error;
 use uuid::Uuid;
@@ -94,7 +94,7 @@ where
         updated_at: Set(Utc::now().naive_utc()),
     })
     .on_conflict(
-        OnConflict::column(authz_realm_states::Column::RealmId)
+        OnConflict::column(authz_realm_states::COLUMN.realm_id)
             .do_nothing()
             .to_owned(),
     )
@@ -104,15 +104,15 @@ where
 
     let bumped = authz_realm_states::Entity::update_many()
         .col_expr(
-            authz_realm_states::Column::Version,
-            Expr::col(authz_realm_states::Column::Version).add(1),
+            authz_realm_states::COLUMN.version,
+            Expr::col(authz_realm_states::COLUMN.version).add(1),
         )
         .col_expr(
-            authz_realm_states::Column::UpdatedAt,
+            authz_realm_states::COLUMN.updated_at,
             Expr::value(Utc::now().naive_utc()),
         )
-        .filter(authz_realm_states::Column::RealmId.eq(realm_id))
-        .filter(authz_realm_states::Column::Version.eq(expected_version))
+        .filter(authz_realm_states::COLUMN.realm_id.eq(realm_id))
+        .filter(authz_realm_states::COLUMN.version.eq(expected_version))
         .exec(conn)
         .await
         .map_err(internal("bump authz version"))?;
@@ -212,14 +212,34 @@ fn tuple_from_db(model: authz_relation_tuples::Model) -> Result<RelationTuple, C
 
 fn tuple_key(realm_id: Uuid, tuple: &RelationTuple) -> Condition {
     Condition::all()
-        .add(authz_relation_tuples::Column::RealmId.eq(realm_id))
-        .add(authz_relation_tuples::Column::ObjectType.eq(tuple.object.ty.as_str()))
-        .add(authz_relation_tuples::Column::ObjectId.eq(tuple.object.id.as_str()))
-        .add(authz_relation_tuples::Column::Relation.eq(tuple.relation.as_str()))
-        .add(authz_relation_tuples::Column::SubjectType.eq(tuple.subject.ty.as_str()))
-        .add(authz_relation_tuples::Column::SubjectId.eq(tuple.subject.id.as_str()))
+        .add(authz_relation_tuples::COLUMN.realm_id.eq(realm_id))
         .add(
-            authz_relation_tuples::Column::SubjectRelation.eq(tuple
+            authz_relation_tuples::COLUMN
+                .object_type
+                .eq(tuple.object.ty.as_str()),
+        )
+        .add(
+            authz_relation_tuples::COLUMN
+                .object_id
+                .eq(tuple.object.id.as_str()),
+        )
+        .add(
+            authz_relation_tuples::COLUMN
+                .relation
+                .eq(tuple.relation.as_str()),
+        )
+        .add(
+            authz_relation_tuples::COLUMN
+                .subject_type
+                .eq(tuple.subject.ty.as_str()),
+        )
+        .add(
+            authz_relation_tuples::COLUMN
+                .subject_id
+                .eq(tuple.subject.id.as_str()),
+        )
+        .add(
+            authz_relation_tuples::COLUMN.subject_relation.eq(tuple
                 .subject_relation
                 .as_ref()
                 .map_or("", RelationName::as_str)),
@@ -251,7 +271,7 @@ impl AuthzStateRepository for PostgresAuthzRepository {
             updated_at: Set(Utc::now().naive_utc()),
         })
         .on_conflict(
-            OnConflict::column(authz_realm_states::Column::RealmId)
+            OnConflict::column(authz_realm_states::COLUMN.realm_id)
                 .update_columns([
                     authz_realm_states::Column::Enabled,
                     authz_realm_states::Column::UpdatedAt,
@@ -272,7 +292,7 @@ impl AuthzStateRepository for PostgresAuthzRepository {
 impl AuthzSchemaRepository for PostgresAuthzRepository {
     async fn get(&self, realm: &RealmScope) -> Result<Option<AuthzSchema>, CoreError> {
         authz_schemas::Entity::find()
-            .filter(authz_schemas::Column::RealmId.eq(Uuid::from(realm.id())))
+            .filter(authz_schemas::COLUMN.realm_id.eq(Uuid::from(realm.id())))
             .one(&self.db)
             .await
             .map_err(internal("read authz schema"))?
@@ -301,7 +321,7 @@ impl AuthzSchemaRepository for PostgresAuthzRepository {
             updated_at: Set(now),
         })
         .on_conflict(
-            OnConflict::column(authz_schemas::Column::RealmId)
+            OnConflict::column(authz_schemas::COLUMN.realm_id)
                 .update_columns([
                     authz_schemas::Column::Namespace,
                     authz_schemas::Column::Source,
@@ -321,7 +341,7 @@ impl AuthzSchemaRepository for PostgresAuthzRepository {
 impl PolicyRepository for PostgresAuthzRepository {
     async fn list(&self, realm: &RealmScope) -> Result<Vec<Policy>, CoreError> {
         authz_policies::Entity::find()
-            .filter(authz_policies::Column::RealmId.eq(Uuid::from(realm.id())))
+            .filter(authz_policies::COLUMN.realm_id.eq(Uuid::from(realm.id())))
             .all(&self.db)
             .await
             .map_err(internal("list authz policies"))?
@@ -355,31 +375,31 @@ impl PolicyRepository for PostgresAuthzRepository {
 
         let updated = authz_policies::Entity::update_many()
             .col_expr(
-                authz_policies::Column::Name,
+                authz_policies::COLUMN.name,
                 Expr::value(policy.name.as_str()),
             )
             .col_expr(
-                authz_policies::Column::Description,
+                authz_policies::COLUMN.description,
                 Expr::value(policy.description.clone()),
             )
             .col_expr(
-                authz_policies::Column::Origin,
+                authz_policies::COLUMN.origin,
                 Expr::value(origin_to_db(policy.origin)),
             )
-            .col_expr(authz_policies::Column::Enabled, Expr::value(policy.enabled))
+            .col_expr(authz_policies::COLUMN.enabled, Expr::value(policy.enabled))
             .col_expr(
-                authz_policies::Column::ManagedBy,
+                authz_policies::COLUMN.managed_by,
                 Expr::value(policy.managed_by.as_ref().map(ManagedBy::as_str)),
             )
-            .col_expr(authz_policies::Column::Source, Expr::value(source.clone()))
-            .col_expr(authz_policies::Column::TemplateId, Expr::value(template_id))
+            .col_expr(authz_policies::COLUMN.source, Expr::value(source.clone()))
+            .col_expr(authz_policies::COLUMN.template_id, Expr::value(template_id))
             .col_expr(
-                authz_policies::Column::TemplateLinks,
+                authz_policies::COLUMN.template_links,
                 Expr::value(template_links.clone()),
             )
-            .col_expr(authz_policies::Column::UpdatedAt, Expr::value(now))
-            .filter(authz_policies::Column::Id.eq(policy.id))
-            .filter(authz_policies::Column::RealmId.eq(realm_id))
+            .col_expr(authz_policies::COLUMN.updated_at, Expr::value(now))
+            .filter(authz_policies::COLUMN.id.eq(policy.id))
+            .filter(authz_policies::COLUMN.realm_id.eq(realm_id))
             .exec(&txn)
             .await
             .map_err(on_policy_write(&policy.name))?;
@@ -419,8 +439,8 @@ impl PolicyRepository for PostgresAuthzRepository {
         bump_version(&txn, realm_id, expected_version).await?;
 
         let deleted = authz_policies::Entity::delete_many()
-            .filter(authz_policies::Column::Id.eq(id))
-            .filter(authz_policies::Column::RealmId.eq(realm_id))
+            .filter(authz_policies::COLUMN.id.eq(id))
+            .filter(authz_policies::COLUMN.realm_id.eq(realm_id))
             .exec(&txn)
             .await
             .map_err(internal("delete authz policy"))?;
@@ -435,7 +455,11 @@ impl PolicyRepository for PostgresAuthzRepository {
 impl PolicyTemplateRepository for PostgresAuthzRepository {
     async fn list(&self, realm: &RealmScope) -> Result<Vec<PolicyTemplate>, CoreError> {
         authz_policy_templates::Entity::find()
-            .filter(authz_policy_templates::Column::RealmId.eq(Uuid::from(realm.id())))
+            .filter(
+                authz_policy_templates::COLUMN
+                    .realm_id
+                    .eq(Uuid::from(realm.id())),
+            )
             .all(&self.db)
             .await
             .map_err(internal("list authz templates"))?
@@ -457,20 +481,20 @@ impl PolicyTemplateRepository for PostgresAuthzRepository {
 
         let updated = authz_policy_templates::Entity::update_many()
             .col_expr(
-                authz_policy_templates::Column::Name,
+                authz_policy_templates::COLUMN.name,
                 Expr::value(template.name.as_str()),
             )
             .col_expr(
-                authz_policy_templates::Column::Description,
+                authz_policy_templates::COLUMN.description,
                 Expr::value(template.description.clone()),
             )
             .col_expr(
-                authz_policy_templates::Column::Source,
+                authz_policy_templates::COLUMN.source,
                 Expr::value(template.source.as_str()),
             )
-            .col_expr(authz_policy_templates::Column::UpdatedAt, Expr::value(now))
-            .filter(authz_policy_templates::Column::Id.eq(template.id))
-            .filter(authz_policy_templates::Column::RealmId.eq(realm_id))
+            .col_expr(authz_policy_templates::COLUMN.updated_at, Expr::value(now))
+            .filter(authz_policy_templates::COLUMN.id.eq(template.id))
+            .filter(authz_policy_templates::COLUMN.realm_id.eq(realm_id))
             .exec(&txn)
             .await
             .map_err(on_write)?;
@@ -505,8 +529,8 @@ impl PolicyTemplateRepository for PostgresAuthzRepository {
         bump_version(&txn, realm_id, expected_version).await?;
 
         let deleted = authz_policy_templates::Entity::delete_many()
-            .filter(authz_policy_templates::Column::Id.eq(id))
-            .filter(authz_policy_templates::Column::RealmId.eq(realm_id))
+            .filter(authz_policy_templates::COLUMN.id.eq(id))
+            .filter(authz_policy_templates::COLUMN.realm_id.eq(realm_id))
             .exec(&txn)
             .await
             .map_err(|e| match e.sql_err() {
@@ -592,9 +616,21 @@ impl RelationTupleRepository for PostgresAuthzRepository {
         subject: &EntityRef,
     ) -> Result<u64, CoreError> {
         let deleted = authz_relation_tuples::Entity::delete_many()
-            .filter(authz_relation_tuples::Column::RealmId.eq(Uuid::from(realm.id())))
-            .filter(authz_relation_tuples::Column::SubjectType.eq(subject.ty.as_str()))
-            .filter(authz_relation_tuples::Column::SubjectId.eq(subject.id.as_str()))
+            .filter(
+                authz_relation_tuples::COLUMN
+                    .realm_id
+                    .eq(Uuid::from(realm.id())),
+            )
+            .filter(
+                authz_relation_tuples::COLUMN
+                    .subject_type
+                    .eq(subject.ty.as_str()),
+            )
+            .filter(
+                authz_relation_tuples::COLUMN
+                    .subject_id
+                    .eq(subject.id.as_str()),
+            )
             .exec(&self.db)
             .await
             .map_err(internal("delete authz tuples by subject"))?;
@@ -609,7 +645,11 @@ impl PostgresAuthzRepository {
     /// expansion lands; the port exposes no read yet.
     pub async fn list_tuples(&self, realm: &RealmScope) -> Result<Vec<RelationTuple>, CoreError> {
         authz_relation_tuples::Entity::find()
-            .filter(authz_relation_tuples::Column::RealmId.eq(Uuid::from(realm.id())))
+            .filter(
+                authz_relation_tuples::COLUMN
+                    .realm_id
+                    .eq(Uuid::from(realm.id())),
+            )
             .all(&self.db)
             .await
             .map_err(internal("list authz tuples"))?

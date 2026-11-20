@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, QueryTrait, Select, Statement,
+    ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
+    QueryOrder, QueryTrait, Select, Statement,
 };
 use uuid::Uuid;
 
@@ -46,47 +46,45 @@ impl SortColumn<compass_flows::Entity> for FlowSortField {
 }
 
 fn listing_select(realm_id: Uuid, filter: &FlowFilter) -> Select<compass_flows::Entity> {
-    use compass_flows::Column;
-
     compass_flows::Entity::find()
-        .filter(Column::RealmId.eq(realm_id))
+        .filter(compass_flows::COLUMN.realm_id.eq(realm_id))
         .apply_if(filter.client_id.as_deref(), |select, value| {
-            select.filter(Column::ClientId.eq(value))
+            select.filter(compass_flows::COLUMN.client_id.eq(value))
         })
         .apply_if(filter.user_id, |select, value| {
-            select.filter(Column::UserId.eq(value))
+            select.filter(compass_flows::COLUMN.user_id.eq(value))
         })
         .apply_if(filter.grant_type.as_deref(), |select, value| {
-            select.filter(Column::GrantType.eq(value))
+            select.filter(compass_flows::COLUMN.grant_type.eq(value))
         })
         .apply_if(filter.status.as_ref(), |select, value| {
-            select.filter(Column::Status.eq(value.to_string()))
+            select.filter(compass_flows::COLUMN.status.eq(value.to_string()))
         })
         .apply_if(filter.search.as_deref(), |select, value| {
-            select.filter(contains(Column::IpAddress, value))
+            select.filter(contains(compass_flows::COLUMN.ip_address, value))
         })
         .apply_if(filter.ip_address.as_deref(), |select, value| {
-            select.filter(contains(Column::IpAddress, value))
+            select.filter(contains(compass_flows::COLUMN.ip_address, value))
         })
         .apply_if(filter.identified, |select, value| {
             select.filter(if value {
-                Column::UserId.is_not_null()
+                compass_flows::COLUMN.user_id.is_not_null()
             } else {
-                Column::UserId.is_null()
+                compass_flows::COLUMN.user_id.is_null()
             })
         })
         .apply_if(filter.completed, |select, value| {
             select.filter(if value {
-                Column::CompletedAt.is_not_null()
+                compass_flows::COLUMN.completed_at.is_not_null()
             } else {
-                Column::CompletedAt.is_null()
+                compass_flows::COLUMN.completed_at.is_null()
             })
         })
         .apply_if(filter.from_timestamp, |select, value| {
-            select.filter(Column::StartedAt.gte(value.naive_utc()))
+            select.filter(compass_flows::COLUMN.started_at.gte(value.naive_utc()))
         })
         .apply_if(filter.to_timestamp, |select, value| {
-            select.filter(Column::StartedAt.lte(value.naive_utc()))
+            select.filter(compass_flows::COLUMN.started_at.lte(value.naive_utc()))
         })
 }
 
@@ -219,9 +217,9 @@ impl CompassFlowRepository for PostgresCompassFlowRepository {
 
         let flow_ids: Vec<Uuid> = models.iter().map(|model| model.id).collect();
         let mut steps = compass_flow_steps::Entity::find()
-            .filter(compass_flow_steps::Column::FlowId.is_in(flow_ids))
-            .order_by_asc(compass_flow_steps::Column::StartedAt)
-            .order_by_asc(compass_flow_steps::Column::Id)
+            .filter(compass_flow_steps::COLUMN.flow_id.is_in(flow_ids))
+            .order_by_asc(compass_flow_steps::COLUMN.started_at)
+            .order_by_asc(compass_flow_steps::COLUMN.id)
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -274,7 +272,7 @@ impl CompassFlowRepository for PostgresCompassFlowRepository {
 
     async fn purge_old_flows(&self, older_than: DateTime<Utc>) -> Result<u64, CoreError> {
         let result = compass_flows::Entity::delete_many()
-            .filter(compass_flows::Column::StartedAt.lt(older_than.naive_utc()))
+            .filter(compass_flows::COLUMN.started_at.lt(older_than.naive_utc()))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -288,11 +286,19 @@ impl CompassFlowRepository for PostgresCompassFlowRepository {
     async fn expire_stale_flows(&self, started_before: DateTime<Utc>) -> Result<u64, CoreError> {
         let result = compass_flows::Entity::update_many()
             .col_expr(
-                compass_flows::Column::Status,
+                compass_flows::COLUMN.status,
                 sea_orm::sea_query::Expr::value(FlowStatus::Expired.to_string()),
             )
-            .filter(compass_flows::Column::Status.eq(FlowStatus::Pending.to_string()))
-            .filter(compass_flows::Column::StartedAt.lt(started_before.naive_utc()))
+            .filter(
+                compass_flows::COLUMN
+                    .status
+                    .eq(FlowStatus::Pending.to_string()),
+            )
+            .filter(
+                compass_flows::COLUMN
+                    .started_at
+                    .lt(started_before.naive_utc()),
+            )
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -307,7 +313,7 @@ impl CompassFlowRepository for PostgresCompassFlowRepository {
         let realm_uuid: Uuid = realm_id.into();
 
         let total = compass_flows::Entity::find()
-            .filter(compass_flows::Column::RealmId.eq(realm_uuid))
+            .filter(compass_flows::COLUMN.realm_id.eq(realm_uuid))
             .count(&self.db)
             .await
             .map_err(|e| {
@@ -316,8 +322,8 @@ impl CompassFlowRepository for PostgresCompassFlowRepository {
             })? as i64;
 
         let success_count = compass_flows::Entity::find()
-            .filter(compass_flows::Column::RealmId.eq(realm_uuid))
-            .filter(compass_flows::Column::Status.eq("success"))
+            .filter(compass_flows::COLUMN.realm_id.eq(realm_uuid))
+            .filter(compass_flows::COLUMN.status.eq("success"))
             .count(&self.db)
             .await
             .map_err(|e| {
@@ -326,8 +332,8 @@ impl CompassFlowRepository for PostgresCompassFlowRepository {
             })? as i64;
 
         let failure_count = compass_flows::Entity::find()
-            .filter(compass_flows::Column::RealmId.eq(realm_uuid))
-            .filter(compass_flows::Column::Status.eq("failure"))
+            .filter(compass_flows::COLUMN.realm_id.eq(realm_uuid))
+            .filter(compass_flows::COLUMN.status.eq("failure"))
             .count(&self.db)
             .await
             .map_err(|e| {
@@ -336,8 +342,8 @@ impl CompassFlowRepository for PostgresCompassFlowRepository {
             })? as i64;
 
         let pending_count = compass_flows::Entity::find()
-            .filter(compass_flows::Column::RealmId.eq(realm_uuid))
-            .filter(compass_flows::Column::Status.eq("pending"))
+            .filter(compass_flows::COLUMN.realm_id.eq(realm_uuid))
+            .filter(compass_flows::COLUMN.status.eq("pending"))
             .count(&self.db)
             .await
             .map_err(|e| {

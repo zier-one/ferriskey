@@ -1,10 +1,9 @@
+use crate::entity::redirect_uris::COLUMN;
 use crate::{
     domain::common::entities::app_errors::CoreError,
     entity::redirect_uris::{ActiveModel, Entity as RedirectUriEntity},
 };
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::domain::client::{entities::redirect_uri::RedirectUri, ports::RedirectUriRepository};
@@ -47,7 +46,7 @@ impl RedirectUriRepository for PostgresRedirectUriRepository {
 
     async fn get_by_client_id(&self, client_id: Uuid) -> Result<Vec<RedirectUri>, CoreError> {
         let redirect_uris = RedirectUriEntity::find()
-            .filter(crate::entity::redirect_uris::Column::ClientId.eq(client_id))
+            .filter(COLUMN.client_id.eq(client_id))
             .all(&self.db)
             .await
             .map_err(|_| CoreError::RedirectUriNotFound)?;
@@ -65,8 +64,8 @@ impl RedirectUriRepository for PostgresRedirectUriRepository {
         client_id: Uuid,
     ) -> Result<Vec<RedirectUri>, CoreError> {
         let redirect_uris = RedirectUriEntity::find()
-            .filter(crate::entity::redirect_uris::Column::ClientId.eq(client_id))
-            .filter(crate::entity::redirect_uris::Column::Enabled.eq(true))
+            .filter(COLUMN.client_id.eq(client_id))
+            .filter(COLUMN.enabled.eq(true))
             .all(&self.db)
             .await
             .map_err(|_| CoreError::RedirectUriNotFound)?
@@ -84,8 +83,8 @@ impl RedirectUriRepository for PostgresRedirectUriRepository {
         enabled: bool,
     ) -> Result<RedirectUri, CoreError> {
         let redirect_uri = RedirectUriEntity::find()
-            .filter(crate::entity::redirect_uris::Column::Id.eq(id))
-            .filter(crate::entity::redirect_uris::Column::ClientId.eq(client_id))
+            .filter(COLUMN.id.eq(id))
+            .filter(COLUMN.client_id.eq(client_id))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::RedirectUriNotFound)?;
@@ -109,8 +108,8 @@ impl RedirectUriRepository for PostgresRedirectUriRepository {
 
     async fn delete(&self, client_id: Uuid, id: Uuid) -> Result<(), CoreError> {
         let result = RedirectUriEntity::delete_many()
-            .filter(crate::entity::redirect_uris::Column::Id.eq(id))
-            .filter(crate::entity::redirect_uris::Column::ClientId.eq(client_id))
+            .filter(COLUMN.id.eq(id))
+            .filter(COLUMN.client_id.eq(client_id))
             .exec(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;

@@ -1,7 +1,6 @@
+use crate::entity::smtp_configs::COLUMN;
 use ferriskey_security::crypto::secret_cipher::SecretCipher;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::{
@@ -56,7 +55,7 @@ impl PostgresSmtpConfigRepository {
 impl SmtpConfigRepository for PostgresSmtpConfigRepository {
     async fn get_by_realm_id(&self, realm_id: RealmId) -> Result<Option<SmtpConfig>, CoreError> {
         let result = SmtpConfigEntity::find()
-            .filter(crate::entity::smtp_configs::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .one(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?
@@ -70,7 +69,7 @@ impl SmtpConfigRepository for PostgresSmtpConfigRepository {
         let now = chrono::Utc::now().fixed_offset();
 
         let existing = SmtpConfigEntity::find()
-            .filter(crate::entity::smtp_configs::Column::RealmId.eq(config.realm_id))
+            .filter(COLUMN.realm_id.eq(config.realm_id))
             .one(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;
@@ -118,7 +117,7 @@ impl SmtpConfigRepository for PostgresSmtpConfigRepository {
 
     async fn delete_by_realm_id(&self, realm_id: RealmId) -> Result<(), CoreError> {
         SmtpConfigEntity::delete_many()
-            .filter(crate::entity::smtp_configs::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .exec(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;

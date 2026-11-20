@@ -1,7 +1,6 @@
+use crate::entity::post_logout_redirect_uris::COLUMN;
 use chrono::{TimeZone, Utc};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::domain::client::entities::redirect_uri::RedirectUri;
@@ -47,7 +46,7 @@ impl PostLogoutRedirectUriRepository for PostgresPostLogoutRedirectUriRepository
 
     async fn get_by_client_id(&self, client_id: Uuid) -> Result<Vec<RedirectUri>, CoreError> {
         let redirect_uris = crate::entity::post_logout_redirect_uris::Entity::find()
-            .filter(crate::entity::post_logout_redirect_uris::Column::ClientId.eq(client_id))
+            .filter(COLUMN.client_id.eq(client_id))
             .all(&self.db)
             .await
             .map_err(|_| CoreError::RedirectUriNotFound)?
@@ -63,8 +62,8 @@ impl PostLogoutRedirectUriRepository for PostgresPostLogoutRedirectUriRepository
         client_id: Uuid,
     ) -> Result<Vec<RedirectUri>, CoreError> {
         let redirect_uris = crate::entity::post_logout_redirect_uris::Entity::find()
-            .filter(crate::entity::post_logout_redirect_uris::Column::ClientId.eq(client_id))
-            .filter(crate::entity::post_logout_redirect_uris::Column::Enabled.eq(true))
+            .filter(COLUMN.client_id.eq(client_id))
+            .filter(COLUMN.enabled.eq(true))
             .all(&self.db)
             .await
             .map_err(|_| CoreError::RedirectUriNotFound)?
@@ -82,8 +81,8 @@ impl PostLogoutRedirectUriRepository for PostgresPostLogoutRedirectUriRepository
         enabled: bool,
     ) -> Result<RedirectUri, CoreError> {
         let redirect_uri = crate::entity::post_logout_redirect_uris::Entity::find()
-            .filter(crate::entity::post_logout_redirect_uris::Column::Id.eq(id))
-            .filter(crate::entity::post_logout_redirect_uris::Column::ClientId.eq(client_id))
+            .filter(COLUMN.id.eq(id))
+            .filter(COLUMN.client_id.eq(client_id))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::RedirectUriNotFound)?;
@@ -107,8 +106,8 @@ impl PostLogoutRedirectUriRepository for PostgresPostLogoutRedirectUriRepository
 
     async fn delete(&self, client_id: Uuid, id: Uuid) -> Result<(), CoreError> {
         let result = crate::entity::post_logout_redirect_uris::Entity::delete_many()
-            .filter(crate::entity::post_logout_redirect_uris::Column::Id.eq(id))
-            .filter(crate::entity::post_logout_redirect_uris::Column::ClientId.eq(client_id))
+            .filter(COLUMN.id.eq(id))
+            .filter(COLUMN.client_id.eq(client_id))
             .exec(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;

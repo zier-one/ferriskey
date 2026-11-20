@@ -10,8 +10,8 @@ use ferriskey_domain::common::app_errors::CoreError;
 use ferriskey_domain::realm::scope::RealmScope;
 use sea_orm::sea_query::Query;
 use sea_orm::{
-    ColumnTrait, DatabaseBackend, DatabaseConnection, DbErr, EntityTrait, FromQueryResult,
-    QueryFilter, Statement,
+    DatabaseBackend, DatabaseConnection, DbErr, EntityTrait, FromQueryResult, QueryFilter,
+    Statement,
 };
 use tracing::error;
 use uuid::Uuid;
@@ -74,13 +74,13 @@ impl PostgresPrincipalSliceRepository {
         user_id: Uuid,
     ) -> Result<Vec<roles::Model>, CoreError> {
         roles::Entity::find()
-            .filter(roles::Column::RealmId.eq(realm_id))
+            .filter(roles::COLUMN.realm_id.eq(realm_id))
             .filter(
-                roles::Column::Id.in_subquery(
+                roles::COLUMN.id.in_subquery(
                     Query::select()
-                        .column(user_role::Column::RoleId)
+                        .column(user_role::COLUMN.role_id)
                         .from(user_role::Entity)
-                        .and_where(user_role::Column::UserId.eq(user_id))
+                        .and_where(user_role::COLUMN.user_id.eq(user_id))
                         .to_owned(),
                 ),
             )
@@ -95,14 +95,14 @@ impl PostgresPrincipalSliceRepository {
         user: users::Model,
     ) -> Result<PrincipalSlice, CoreError> {
         let attributes = user_attributes::Entity::find()
-            .filter(user_attributes::Column::UserId.eq(user.id))
-            .filter(user_attributes::Column::RealmId.eq(realm_id))
+            .filter(user_attributes::COLUMN.user_id.eq(user.id))
+            .filter(user_attributes::COLUMN.realm_id.eq(realm_id))
             .all(&self.db)
             .await
             .map_err(internal("load principal attributes"))?;
         let roles = self.roles_of_user(realm_id, user.id).await?;
         let direct_organizations = organization_members::Entity::find()
-            .filter(organization_members::Column::UserId.eq(user.id))
+            .filter(organization_members::COLUMN.user_id.eq(user.id))
             .all(&self.db)
             .await
             .map_err(internal("load principal organizations"))?;
@@ -141,8 +141,8 @@ impl PostgresPrincipalSliceRepository {
             .chain(groups.iter().map(|g| g.organization_id))
             .collect();
         let organizations = organizations::Entity::find()
-            .filter(organizations::Column::RealmId.eq(realm_id))
-            .filter(organizations::Column::Id.is_in(wanted))
+            .filter(organizations::COLUMN.realm_id.eq(realm_id))
+            .filter(organizations::COLUMN.id.is_in(wanted))
             .all(&self.db)
             .await
             .map_err(internal("load principal organization facts"))?;
@@ -189,8 +189,8 @@ impl PostgresPrincipalSliceRepository {
             return Ok(None);
         }
         let account = users::Entity::find()
-            .filter(users::Column::ClientId.eq(client.id))
-            .filter(users::Column::RealmId.eq(realm_id))
+            .filter(users::COLUMN.client_id.eq(client.id))
+            .filter(users::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(internal("load service account"))?;
@@ -241,7 +241,7 @@ impl PrincipalSliceRepository for PostgresPrincipalSliceRepository {
 
         if ty == USER_TYPE {
             let user = users::Entity::find_by_id(id)
-                .filter(users::Column::RealmId.eq(realm_id))
+                .filter(users::COLUMN.realm_id.eq(realm_id))
                 .one(&self.db)
                 .await
                 .map_err(internal("load principal user"))?;
@@ -251,7 +251,7 @@ impl PrincipalSliceRepository for PostgresPrincipalSliceRepository {
             }
         } else {
             let client = clients::Entity::find_by_id(id)
-                .filter(clients::Column::RealmId.eq(realm_id))
+                .filter(clients::COLUMN.realm_id.eq(realm_id))
                 .one(&self.db)
                 .await
                 .map_err(internal("load principal client"))?;

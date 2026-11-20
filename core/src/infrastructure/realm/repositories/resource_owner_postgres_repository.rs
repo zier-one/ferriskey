@@ -1,14 +1,15 @@
+use crate::entity::realm_resource_owners::COLUMN;
 use chrono::Utc;
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, TransactionTrait,
+    ActiveValue::Set, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    TransactionTrait,
 };
 use uuid::Uuid;
 
 use crate::domain::common::entities::app_errors::CoreError;
 use crate::domain::realm::entities::{RealmId, ResourceOwner};
 use crate::domain::realm::ports::ResourceOwnerRepository;
-use crate::entity::realm_resource_owners::{ActiveModel, Column, Entity, Model};
+use crate::entity::realm_resource_owners::{ActiveModel, Entity, Model};
 
 impl From<Model> for ResourceOwner {
     fn from(model: Model) -> Self {
@@ -35,8 +36,8 @@ impl ResourceOwnerRepository for PostgresResourceOwnerRepository {
         let realm_id: Uuid = realm_id.into();
 
         let rows = Entity::find()
-            .filter(Column::RealmId.eq(realm_id))
-            .order_by_asc(Column::Uri)
+            .filter(COLUMN.realm_id.eq(realm_id))
+            .order_by_asc(COLUMN.uri)
             .all(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;
@@ -58,7 +59,7 @@ impl ResourceOwnerRepository for PostgresResourceOwnerRepository {
             .map_err(|e| CoreError::Database(e.to_string()))?;
 
         Entity::delete_many()
-            .filter(Column::RealmId.eq(realm_id))
+            .filter(COLUMN.realm_id.eq(realm_id))
             .exec(&txn)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;
@@ -96,9 +97,9 @@ impl ResourceOwnerRepository for PostgresResourceOwnerRepository {
         let realm_id: Uuid = realm_id.into();
 
         let owned = Entity::find()
-            .filter(Column::RealmId.eq(realm_id))
-            .filter(Column::ClientId.eq(client_id))
-            .filter(Column::Uri.is_in(uris.iter().cloned()))
+            .filter(COLUMN.realm_id.eq(realm_id))
+            .filter(COLUMN.client_id.eq(client_id))
+            .filter(COLUMN.uri.is_in(uris.iter().cloned()))
             .count(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;

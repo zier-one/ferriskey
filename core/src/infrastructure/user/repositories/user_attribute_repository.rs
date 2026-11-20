@@ -1,9 +1,9 @@
+use crate::entity::user_attributes::COLUMN;
 use std::collections::HashMap;
 
 use chrono::Utc;
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    sea_query::OnConflict,
+    ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter, sea_query::OnConflict,
 };
 use tracing::error;
 use uuid::Uuid;
@@ -28,7 +28,7 @@ impl PostgresUserAttributeRepository {
 impl UserAttributeRepository for PostgresUserAttributeRepository {
     async fn list_by_user_id(&self, user_id: Uuid) -> Result<Vec<UserAttribute>, CoreError> {
         let models = crate::entity::user_attributes::Entity::find()
-            .filter(crate::entity::user_attributes::Column::UserId.eq(user_id))
+            .filter(COLUMN.user_id.eq(user_id))
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -85,8 +85,8 @@ impl UserAttributeRepository for PostgresUserAttributeRepository {
             })?;
 
         let updated = crate::entity::user_attributes::Entity::find()
-            .filter(crate::entity::user_attributes::Column::UserId.eq(user_id))
-            .filter(crate::entity::user_attributes::Column::Key.is_in(keys))
+            .filter(COLUMN.user_id.eq(user_id))
+            .filter(COLUMN.key.is_in(keys))
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -101,8 +101,8 @@ impl UserAttributeRepository for PostgresUserAttributeRepository {
         let result = crate::entity::user_attributes::Entity::delete_many()
             .filter(
                 sea_orm::Condition::all()
-                    .add(crate::entity::user_attributes::Column::UserId.eq(user_id))
-                    .add(crate::entity::user_attributes::Column::Key.eq(key)),
+                    .add(COLUMN.user_id.eq(user_id))
+                    .add(COLUMN.key.eq(key)),
             )
             .exec(&self.db)
             .await

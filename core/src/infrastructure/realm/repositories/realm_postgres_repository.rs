@@ -1,6 +1,8 @@
+use crate::entity::realm_resource_owners;
+use crate::entity::realm_settings;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, DatabaseConnection, EntityTrait,
-    QueryFilter, QueryTrait, Select, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, Condition, DatabaseConnection, EntityTrait, QueryFilter,
+    QueryTrait, Select, TransactionTrait,
 };
 
 use crate::{
@@ -36,19 +38,23 @@ impl SortColumn<realms::Entity> for RealmSortField {
 
 fn listing_select(accessible: &[RealmId], filter: &RealmFilter) -> Select<realms::Entity> {
     RealmEntity::find()
-        .filter(realms::Column::Id.is_in(accessible.iter().map(|id| Uuid::from(*id))))
+        .filter(
+            realms::COLUMN
+                .id
+                .is_in(accessible.iter().map(|id| Uuid::from(*id))),
+        )
         .apply_if(filter.search.as_deref(), |select, value| {
             select.filter(
                 Condition::any()
-                    .add(contains(realms::Column::Name, value))
-                    .add(contains(realms::Column::DisplayName, value)),
+                    .add(contains(realms::COLUMN.name, value))
+                    .add(contains(realms::COLUMN.display_name, value)),
             )
         })
         .apply_if(filter.name.as_deref(), |select, value| {
-            select.filter(contains(realms::Column::Name, value))
+            select.filter(contains(realms::COLUMN.name, value))
         })
         .apply_if(filter.display_name.as_deref(), |select, value| {
-            select.filter(contains(realms::Column::DisplayName, value))
+            select.filter(contains(realms::COLUMN.display_name, value))
         })
 }
 
@@ -111,7 +117,7 @@ impl RealmRepository for PostgresRealmRepository {
     async fn get_by_name(&self, name: &str) -> Result<Option<Realm>, CoreError> {
         info_span!("Fetching realm by name", name = name);
         let realm_model = RealmEntity::find()
-            .filter(crate::entity::realms::Column::Name.eq(name))
+            .filter(realms::COLUMN.name.eq(name))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;
@@ -123,7 +129,7 @@ impl RealmRepository for PostgresRealmRepository {
         let mut realm = Realm::from(model);
 
         let settings = crate::entity::realm_settings::Entity::find()
-            .filter(crate::entity::realm_settings::Column::RealmId.eq::<Uuid>(realm.id.into()))
+            .filter(realm_settings::COLUMN.realm_id.eq::<Uuid>(realm.id.into()))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;
@@ -138,7 +144,7 @@ impl RealmRepository for PostgresRealmRepository {
         realm_id: crate::domain::realm::entities::RealmId,
     ) -> Result<Option<Realm>, CoreError> {
         let realm = RealmEntity::find()
-            .filter(crate::entity::realms::Column::Id.eq::<Uuid>(realm_id.into()))
+            .filter(realms::COLUMN.id.eq::<Uuid>(realm_id.into()))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?
@@ -185,7 +191,7 @@ impl RealmRepository for PostgresRealmRepository {
         display_name: Option<String>,
     ) -> Result<Realm, CoreError> {
         let realm = RealmEntity::find()
-            .filter(crate::entity::realms::Column::Name.eq(realm_name))
+            .filter(realms::COLUMN.name.eq(realm_name))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?
@@ -201,7 +207,7 @@ impl RealmRepository for PostgresRealmRepository {
             .map_err(|_| CoreError::InternalServerError)?;
 
         let updated_realm = RealmEntity::find()
-            .filter(crate::entity::realms::Column::Name.eq(name))
+            .filter(realms::COLUMN.name.eq(name))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?
@@ -212,7 +218,7 @@ impl RealmRepository for PostgresRealmRepository {
 
     async fn delete_by_name(&self, name: &str) -> Result<(), CoreError> {
         let res = RealmEntity::delete_many()
-            .filter(crate::entity::realms::Column::Name.eq(name))
+            .filter(realms::COLUMN.name.eq(name))
             .exec(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;
@@ -292,7 +298,7 @@ impl RealmRepository for PostgresRealmRepository {
         require_pushed_authorization_requests: Option<bool>,
     ) -> Result<RealmSetting, CoreError> {
         let realm_setting = crate::entity::realm_settings::Entity::find()
-            .filter(crate::entity::realm_settings::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(realm_settings::COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?
@@ -469,10 +475,11 @@ impl RealmRepository for PostgresRealmRepository {
         if let Some(retained) = retained_resources {
             crate::entity::realm_resource_owners::Entity::delete_many()
                 .filter(
-                    crate::entity::realm_resource_owners::Column::RealmId
+                    realm_resource_owners::COLUMN
+                        .realm_id
                         .eq::<Uuid>(realm_id.into()),
                 )
-                .filter(crate::entity::realm_resource_owners::Column::Uri.is_not_in(retained))
+                .filter(realm_resource_owners::COLUMN.uri.is_not_in(retained))
                 .exec(&txn)
                 .await
                 .map_err(|_| CoreError::InternalServerError)?;
@@ -490,7 +497,7 @@ impl RealmRepository for PostgresRealmRepository {
         realm_id: RealmId,
     ) -> Result<Option<RealmSetting>, CoreError> {
         let realm_setting = crate::entity::realm_settings::Entity::find()
-            .filter(crate::entity::realm_settings::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(realm_settings::COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;

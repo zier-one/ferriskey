@@ -1,7 +1,6 @@
+use crate::entity::identity_provider_links::COLUMN;
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -13,9 +12,7 @@ use crate::domain::common::entities::app_errors::CoreError;
 use crate::domain::common::generate_uuid_v7;
 use crate::domain::realm::entities::Scoped;
 use crate::domain::user::entities::User;
-use crate::entity::identity_provider_links::{
-    ActiveModel, Column, Entity as IdentityProviderLinkEntity,
-};
+use crate::entity::identity_provider_links::{ActiveModel, Entity as IdentityProviderLinkEntity};
 
 /// PostgreSQL implementation of the IdentityProviderLinkRepository trait
 #[derive(Debug, Clone)]
@@ -63,8 +60,12 @@ impl IdentityProviderLinkRepository for PostgresIdentityProviderLinkRepository {
         external_user_id: &str,
     ) -> Result<Option<IdentityProviderLink>, CoreError> {
         let link = IdentityProviderLinkEntity::find()
-            .filter(Column::IdentityProviderId.eq::<Uuid>(provider.get().id.into()))
-            .filter(Column::IdentityProviderUserId.eq(external_user_id))
+            .filter(
+                COLUMN
+                    .identity_provider_id
+                    .eq::<Uuid>(provider.get().id.into()),
+            )
+            .filter(COLUMN.identity_provider_user_id.eq(external_user_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -82,7 +83,7 @@ impl IdentityProviderLinkRepository for PostgresIdentityProviderLinkRepository {
         user: &Scoped<User>,
     ) -> Result<Vec<IdentityProviderLink>, CoreError> {
         let links = IdentityProviderLinkEntity::find()
-            .filter(Column::UserId.eq(user.get().id))
+            .filter(COLUMN.user_id.eq(user.get().id))
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -103,8 +104,12 @@ impl IdentityProviderLinkRepository for PostgresIdentityProviderLinkRepository {
         provider: &Scoped<IdentityProvider>,
     ) -> Result<Option<IdentityProviderLink>, CoreError> {
         let link = IdentityProviderLinkEntity::find()
-            .filter(Column::UserId.eq(user.get().id))
-            .filter(Column::IdentityProviderId.eq::<Uuid>(provider.get().id.into()))
+            .filter(COLUMN.user_id.eq(user.get().id))
+            .filter(
+                COLUMN
+                    .identity_provider_id
+                    .eq::<Uuid>(provider.get().id.into()),
+            )
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -127,8 +132,12 @@ impl IdentityProviderLinkRepository for PostgresIdentityProviderLinkRepository {
         token: Option<String>,
     ) -> Result<(), CoreError> {
         let existing = IdentityProviderLinkEntity::find()
-            .filter(Column::Id.eq(id))
-            .filter(Column::IdentityProviderId.eq::<Uuid>(provider.get().id.into()))
+            .filter(COLUMN.id.eq(id))
+            .filter(
+                COLUMN
+                    .identity_provider_id
+                    .eq::<Uuid>(provider.get().id.into()),
+            )
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -152,8 +161,8 @@ impl IdentityProviderLinkRepository for PostgresIdentityProviderLinkRepository {
     #[instrument(skip(self), fields(link_id = %id, user_id = %user.get().id))]
     async fn delete(&self, user: &Scoped<User>, id: Uuid) -> Result<(), CoreError> {
         IdentityProviderLinkEntity::delete_many()
-            .filter(Column::Id.eq(id))
-            .filter(Column::UserId.eq(user.get().id))
+            .filter(COLUMN.id.eq(id))
+            .filter(COLUMN.user_id.eq(user.get().id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -167,7 +176,7 @@ impl IdentityProviderLinkRepository for PostgresIdentityProviderLinkRepository {
     #[instrument(skip(self), fields(user_id = %user.get().id))]
     async fn delete_by_user_id(&self, user: &Scoped<User>) -> Result<u64, CoreError> {
         let result = IdentityProviderLinkEntity::delete_many()
-            .filter(Column::UserId.eq(user.get().id))
+            .filter(COLUMN.user_id.eq(user.get().id))
             .exec(&self.db)
             .await
             .map_err(|e| {

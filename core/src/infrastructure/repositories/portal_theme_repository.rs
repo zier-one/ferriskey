@@ -1,9 +1,10 @@
+use crate::entity::portal_themes;
+use crate::entity::realm_settings;
 use chrono::{TimeZone, Utc};
 use sea_orm::ExprTrait;
 use sea_orm::{
     ActiveValue::Set,
-    ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QueryTrait, Select,
-    TransactionTrait,
+    Condition, DatabaseConnection, EntityTrait, QueryFilter, QueryTrait, Select, TransactionTrait,
     sea_query::{Alias, Expr, Func, SimpleExpr},
 };
 use tracing::{error, warn};
@@ -42,7 +43,7 @@ impl PostgresPortalThemeRepository {
 
     async fn load(&self, realm_id: Uuid, theme_id: Uuid) -> Result<Option<PortalTheme>, CoreError> {
         let model = Entity::find_by_id(theme_id)
-            .filter(Column::RealmId.eq(realm_id))
+            .filter(portal_themes::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -65,7 +66,7 @@ impl PostgresPortalThemeRepository {
         };
 
         let owned = pl::Entity::find_by_id(layout_id)
-            .filter(pl::Column::RealmId.eq(realm_id))
+            .filter(pl::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -175,16 +176,19 @@ fn every_required_block_present() -> Condition {
 
 fn listing_select(realm_id: Uuid, filter: &PortalThemeFilter) -> Select<Entity> {
     Entity::find()
-        .filter(Column::RealmId.eq(realm_id))
-        .filter(within_naive(Column::CreatedAt, &filter.created))
+        .filter(portal_themes::COLUMN.realm_id.eq(realm_id))
+        .filter(within_naive(
+            portal_themes::COLUMN.created_at,
+            &filter.created,
+        ))
         .apply_if(filter.search.as_deref(), |select, value| {
-            select.filter(contains(Column::Name, value))
+            select.filter(contains(portal_themes::COLUMN.name, value))
         })
         .apply_if(filter.name.as_deref(), |select, value| {
-            select.filter(contains(Column::Name, value))
+            select.filter(contains(portal_themes::COLUMN.name, value))
         })
         .apply_if(filter.layout_id, |select, value| {
-            select.filter(Column::LayoutId.eq(value))
+            select.filter(portal_themes::COLUMN.layout_id.eq(value))
         })
         .apply_if(filter.activatable, |select, activatable| {
             select.filter(if activatable {
@@ -322,7 +326,7 @@ impl PortalThemeRepository for PostgresPortalThemeRepository {
         self.require_layout_of_realm(realm_id, layout_id).await?;
 
         let existing = Entity::find_by_id(theme.get().id)
-            .filter(Column::RealmId.eq(realm_id))
+            .filter(portal_themes::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -354,7 +358,7 @@ impl PortalThemeRepository for PostgresPortalThemeRepository {
         let realm_id: Uuid = theme.get().realm_id.into();
         let theme_id = theme.get().id;
         let existing = Entity::find_by_id(theme_id)
-            .filter(Column::RealmId.eq(realm_id))
+            .filter(portal_themes::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -369,8 +373,11 @@ impl PortalThemeRepository for PostgresPortalThemeRepository {
                 page_column(page_type),
                 sea_orm::sea_query::Expr::value(tree),
             )
-            .col_expr(Column::UpdatedAt, sea_orm::sea_query::Expr::value(now))
-            .filter(Column::Id.eq(existing.id))
+            .col_expr(
+                portal_themes::COLUMN.updated_at,
+                sea_orm::sea_query::Expr::value(now),
+            )
+            .filter(portal_themes::COLUMN.id.eq(existing.id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -392,7 +399,7 @@ impl PortalThemeRepository for PostgresPortalThemeRepository {
         })?;
 
         Entity::find_by_id(theme_id)
-            .filter(Column::RealmId.eq(realm_id))
+            .filter(portal_themes::COLUMN.realm_id.eq(realm_id))
             .one(&txn)
             .await
             .map_err(|e| {
@@ -413,8 +420,12 @@ impl PortalThemeRepository for PostgresPortalThemeRepository {
 
     async fn delete(&self, theme: &Scoped<PortalTheme>) -> Result<(), CoreError> {
         let result = Entity::delete_many()
-            .filter(Column::Id.eq(theme.get().id))
-            .filter(Column::RealmId.eq::<Uuid>(theme.get().realm_id.into()))
+            .filter(portal_themes::COLUMN.id.eq(theme.get().id))
+            .filter(
+                portal_themes::COLUMN
+                    .realm_id
+                    .eq::<Uuid>(theme.get().realm_id.into()),
+            )
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -431,7 +442,7 @@ impl PortalThemeRepository for PostgresPortalThemeRepository {
 
     async fn get_active(&self, realm_id: Uuid) -> Result<Option<PortalTheme>, CoreError> {
         let settings = crate::entity::realm_settings::Entity::find()
-            .filter(crate::entity::realm_settings::Column::RealmId.eq(realm_id))
+            .filter(realm_settings::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -444,7 +455,7 @@ impl PortalThemeRepository for PostgresPortalThemeRepository {
         };
 
         let model = Entity::find_by_id(theme_id)
-            .filter(Column::RealmId.eq(realm_id))
+            .filter(portal_themes::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -469,7 +480,7 @@ where
     use crate::entity::realm_settings as rs;
 
     let existing = rs::Entity::find()
-        .filter(rs::Column::RealmId.eq(realm_id))
+        .filter(rs::COLUMN.realm_id.eq(realm_id))
         .one(conn)
         .await
         .map_err(|e| {

@@ -1,7 +1,8 @@
+use crate::entity::user_sessions::COLUMN;
 use chrono::{TimeZone, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, DatabaseConnection, EntityTrait,
-    QueryFilter, QueryTrait, Select, prelude::Expr,
+    ActiveModelTrait, ActiveValue::Set, Condition, DatabaseConnection, EntityTrait, QueryFilter,
+    QueryTrait, Select, prelude::Expr,
 };
 use tracing::error;
 use uuid::Uuid;
@@ -31,30 +32,28 @@ fn listing_select(
     realm_id: Uuid,
     filter: &SessionFilter,
 ) -> Select<user_sessions::Entity> {
-    use user_sessions::Column;
-
     user_sessions::Entity::find()
-        .filter(Column::UserId.eq(user_id))
-        .filter(Column::RealmId.eq(realm_id))
-        .filter(within_naive(Column::CreatedAt, &filter.created))
+        .filter(COLUMN.user_id.eq(user_id))
+        .filter(COLUMN.realm_id.eq(realm_id))
+        .filter(within_naive(COLUMN.created_at, &filter.created))
         .apply_if(filter.search.as_deref(), |select, value| {
             select.filter(
                 Condition::any()
-                    .add(contains(Column::IpAddress, value))
-                    .add(contains(Column::UserAgent, value)),
+                    .add(contains(COLUMN.ip_address, value))
+                    .add(contains(COLUMN.user_agent, value)),
             )
         })
         .apply_if(filter.ip_address.as_deref(), |select, value| {
-            select.filter(contains(Column::IpAddress, value))
+            select.filter(contains(COLUMN.ip_address, value))
         })
         .apply_if(filter.user_agent.as_deref(), |select, value| {
-            select.filter(contains(Column::UserAgent, value))
+            select.filter(contains(COLUMN.user_agent, value))
         })
         .apply_if(filter.persistent, |select, value| {
-            select.filter(Column::Persistent.eq(value))
+            select.filter(COLUMN.persistent.eq(value))
         })
         .apply_if(filter.active_only.then(Utc::now), |select, now| {
-            select.filter(Column::ExpiresAt.gt(now.naive_utc()))
+            select.filter(COLUMN.expires_at.gt(now.naive_utc()))
         })
 }
 
@@ -120,7 +119,7 @@ impl UserSessionRepository for PostgresUserSessionRepository {
 
     async fn find_by_user_id(&self, user_id: &Uuid) -> Result<Unscoped<UserSession>, SessionError> {
         let session = crate::entity::user_sessions::Entity::find()
-            .filter(crate::entity::user_sessions::Column::UserId.eq(*user_id))
+            .filter(COLUMN.user_id.eq(*user_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -138,8 +137,8 @@ impl UserSessionRepository for PostgresUserSessionRepository {
         realm_id: Uuid,
     ) -> Result<Vec<UserSession>, SessionError> {
         let sessions = crate::entity::user_sessions::Entity::find()
-            .filter(crate::entity::user_sessions::Column::UserId.eq(user_id))
-            .filter(crate::entity::user_sessions::Column::RealmId.eq(realm_id))
+            .filter(COLUMN.user_id.eq(user_id))
+            .filter(COLUMN.realm_id.eq(realm_id))
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -175,7 +174,7 @@ impl UserSessionRepository for PostgresUserSessionRepository {
         sso_token_hash: &str,
     ) -> Result<Option<Unscoped<UserSession>>, SessionError> {
         let session = crate::entity::user_sessions::Entity::find()
-            .filter(crate::entity::user_sessions::Column::SsoTokenHash.eq(sso_token_hash))
+            .filter(COLUMN.sso_token_hash.eq(sso_token_hash))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -191,7 +190,7 @@ impl UserSessionRepository for PostgresUserSessionRepository {
         session_id: Uuid,
     ) -> Result<Option<Unscoped<UserSession>>, SessionError> {
         let session = crate::entity::user_sessions::Entity::find()
-            .filter(crate::entity::user_sessions::Column::Id.eq(session_id))
+            .filter(COLUMN.id.eq(session_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -204,8 +203,8 @@ impl UserSessionRepository for PostgresUserSessionRepository {
 
     async fn delete(&self, session: &Scoped<UserSession>) -> Result<(), SessionError> {
         crate::entity::user_sessions::Entity::delete_many()
-            .filter(crate::entity::user_sessions::Column::Id.eq(session.get().id))
-            .filter(crate::entity::user_sessions::Column::RealmId.eq(session.get().realm_id))
+            .filter(COLUMN.id.eq(session.get().id))
+            .filter(COLUMN.realm_id.eq(session.get().realm_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -218,8 +217,8 @@ impl UserSessionRepository for PostgresUserSessionRepository {
 
     async fn delete_all_by_user(&self, user_id: Uuid, realm_id: Uuid) -> Result<u64, SessionError> {
         let result = crate::entity::user_sessions::Entity::delete_many()
-            .filter(crate::entity::user_sessions::Column::UserId.eq(user_id))
-            .filter(crate::entity::user_sessions::Column::RealmId.eq(realm_id))
+            .filter(COLUMN.user_id.eq(user_id))
+            .filter(COLUMN.realm_id.eq(realm_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -236,13 +235,13 @@ impl UserSessionRepository for PostgresUserSessionRepository {
         limit: u64,
     ) -> Result<u64, SessionError> {
         let oldest = sea_orm::sea_query::Query::select()
-            .column(crate::entity::user_sessions::Column::Id)
+            .column(COLUMN.id)
             .from(crate::entity::user_sessions::Entity)
-            .and_where(crate::entity::user_sessions::Column::ExpiresAt.lt(before.naive_utc()))
+            .and_where(COLUMN.expires_at.lt(before.naive_utc()))
             .limit(limit)
             .to_owned();
         let result = crate::entity::user_sessions::Entity::delete_many()
-            .filter(crate::entity::user_sessions::Column::Id.in_subquery(oldest))
+            .filter(COLUMN.id.in_subquery(oldest))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -255,12 +254,9 @@ impl UserSessionRepository for PostgresUserSessionRepository {
 
     async fn update_last_seen(&self, session: &Scoped<UserSession>) -> Result<(), SessionError> {
         crate::entity::user_sessions::Entity::update_many()
-            .col_expr(
-                crate::entity::user_sessions::Column::LastSeenAt,
-                Expr::value(Utc::now().naive_utc()),
-            )
-            .filter(crate::entity::user_sessions::Column::Id.eq(session.get().id))
-            .filter(crate::entity::user_sessions::Column::RealmId.eq(session.get().realm_id))
+            .col_expr(COLUMN.last_seen_at, Expr::value(Utc::now().naive_utc()))
+            .filter(COLUMN.id.eq(session.get().id))
+            .filter(COLUMN.realm_id.eq(session.get().realm_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -277,12 +273,9 @@ impl UserSessionRepository for PostgresUserSessionRepository {
         sso_token_hash: &str,
     ) -> Result<(), SessionError> {
         crate::entity::user_sessions::Entity::update_many()
-            .col_expr(
-                crate::entity::user_sessions::Column::SsoTokenHash,
-                Expr::value(sso_token_hash),
-            )
-            .filter(crate::entity::user_sessions::Column::Id.eq(session.get().id))
-            .filter(crate::entity::user_sessions::Column::RealmId.eq(session.get().realm_id))
+            .col_expr(COLUMN.sso_token_hash, Expr::value(sso_token_hash))
+            .filter(COLUMN.id.eq(session.get().id))
+            .filter(COLUMN.realm_id.eq(session.get().realm_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -297,23 +290,20 @@ impl UserSessionRepository for PostgresUserSessionRepository {
         let session = session.get();
         let result = crate::entity::user_sessions::Entity::update_many()
             .col_expr(
-                crate::entity::user_sessions::Column::SsoTokenHash,
+                COLUMN.sso_token_hash,
                 Expr::value(session.sso_token_hash.clone()),
             )
             .col_expr(
-                crate::entity::user_sessions::Column::AuthenticatedAt,
+                COLUMN.authenticated_at,
                 Expr::value(session.authenticated_at.fixed_offset()),
             )
             .col_expr(
-                crate::entity::user_sessions::Column::ExpiresAt,
+                COLUMN.expires_at,
                 Expr::value(session.expires_at.naive_utc()),
             )
-            .col_expr(
-                crate::entity::user_sessions::Column::Persistent,
-                Expr::value(session.persistent),
-            )
-            .filter(crate::entity::user_sessions::Column::Id.eq(session.id))
-            .filter(crate::entity::user_sessions::Column::RealmId.eq(session.realm_id))
+            .col_expr(COLUMN.persistent, Expr::value(session.persistent))
+            .filter(COLUMN.id.eq(session.id))
+            .filter(COLUMN.realm_id.eq(session.realm_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -334,12 +324,9 @@ impl UserSessionRepository for PostgresUserSessionRepository {
         session: &Scoped<UserSession>,
     ) -> Result<(), SessionError> {
         crate::entity::user_sessions::Entity::update_many()
-            .col_expr(
-                crate::entity::user_sessions::Column::SsoTokenHash,
-                Expr::value(Option::<String>::None),
-            )
-            .filter(crate::entity::user_sessions::Column::Id.eq(session.get().id))
-            .filter(crate::entity::user_sessions::Column::RealmId.eq(session.get().realm_id))
+            .col_expr(COLUMN.sso_token_hash, Expr::value(Option::<String>::None))
+            .filter(COLUMN.id.eq(session.get().id))
+            .filter(COLUMN.realm_id.eq(session.get().realm_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -357,11 +344,11 @@ impl UserSessionRepository for PostgresUserSessionRepository {
     ) -> Result<(), SessionError> {
         let result = crate::entity::user_sessions::Entity::update_many()
             .col_expr(
-                crate::entity::user_sessions::Column::DeviceSessionId,
+                COLUMN.device_session_id,
                 Expr::value(Some(device_session_id)),
             )
-            .filter(crate::entity::user_sessions::Column::Id.eq(session.get().id))
-            .filter(crate::entity::user_sessions::Column::RealmId.eq(session.get().realm_id))
+            .filter(COLUMN.id.eq(session.get().id))
+            .filter(COLUMN.realm_id.eq(session.get().realm_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -378,12 +365,9 @@ impl UserSessionRepository for PostgresUserSessionRepository {
 
     async fn detach_device(&self, session: &Scoped<UserSession>) -> Result<(), SessionError> {
         crate::entity::user_sessions::Entity::update_many()
-            .col_expr(
-                crate::entity::user_sessions::Column::DeviceSessionId,
-                Expr::value(Option::<Uuid>::None),
-            )
-            .filter(crate::entity::user_sessions::Column::Id.eq(session.get().id))
-            .filter(crate::entity::user_sessions::Column::RealmId.eq(session.get().realm_id))
+            .col_expr(COLUMN.device_session_id, Expr::value(Option::<Uuid>::None))
+            .filter(COLUMN.id.eq(session.get().id))
+            .filter(COLUMN.realm_id.eq(session.get().realm_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -401,14 +385,14 @@ impl UserSessionRepository for PostgresUserSessionRepository {
         expected_device_session_id: Uuid,
         new_sso_token_hash: &str,
     ) -> Result<(), SessionError> {
-        use crate::entity::user_sessions::{Column, Entity};
+        use crate::entity::user_sessions::Entity;
 
         let result = Entity::update_many()
-            .col_expr(Column::SsoTokenHash, Expr::value(new_sso_token_hash))
-            .filter(Column::Id.eq(session.get().id))
-            .filter(Column::RealmId.eq(session.get().realm_id))
-            .filter(Column::SsoTokenHash.eq(expected_sso_token_hash))
-            .filter(Column::DeviceSessionId.eq(expected_device_session_id))
+            .col_expr(COLUMN.sso_token_hash, Expr::value(new_sso_token_hash))
+            .filter(COLUMN.id.eq(session.get().id))
+            .filter(COLUMN.realm_id.eq(session.get().realm_id))
+            .filter(COLUMN.sso_token_hash.eq(expected_sso_token_hash))
+            .filter(COLUMN.device_session_id.eq(expected_device_session_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -428,14 +412,14 @@ impl UserSessionRepository for PostgresUserSessionRepository {
         session: &Scoped<UserSession>,
         expected_device_session_id: Uuid,
     ) -> Result<(), SessionError> {
-        use crate::entity::user_sessions::{Column, Entity};
+        use crate::entity::user_sessions::Entity;
 
         let result = Entity::update_many()
-            .col_expr(Column::SsoTokenHash, Expr::value(Option::<String>::None))
-            .col_expr(Column::DeviceSessionId, Expr::value(Option::<Uuid>::None))
-            .filter(Column::Id.eq(session.get().id))
-            .filter(Column::RealmId.eq(session.get().realm_id))
-            .filter(Column::DeviceSessionId.eq(expected_device_session_id))
+            .col_expr(COLUMN.sso_token_hash, Expr::value(Option::<String>::None))
+            .col_expr(COLUMN.device_session_id, Expr::value(Option::<Uuid>::None))
+            .filter(COLUMN.id.eq(session.get().id))
+            .filter(COLUMN.realm_id.eq(session.get().realm_id))
+            .filter(COLUMN.device_session_id.eq(expected_device_session_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -456,8 +440,8 @@ impl UserSessionRepository for PostgresUserSessionRepository {
         realm_id: Uuid,
     ) -> Result<Vec<UserSession>, SessionError> {
         let sessions = crate::entity::user_sessions::Entity::find()
-            .filter(crate::entity::user_sessions::Column::DeviceSessionId.eq(device_session_id))
-            .filter(crate::entity::user_sessions::Column::RealmId.eq(realm_id))
+            .filter(COLUMN.device_session_id.eq(device_session_id))
+            .filter(COLUMN.realm_id.eq(realm_id))
             .all(&self.db)
             .await
             .map_err(|e| {

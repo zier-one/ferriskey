@@ -1,6 +1,7 @@
+use crate::entity::client_scope_protocol_mappers::COLUMN;
 use std::collections::HashMap;
 
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use tracing::error;
 use uuid::Uuid;
 
@@ -23,9 +24,9 @@ async fn protocol_mappers_by_scope(
     }
 
     let rows = client_scope_protocol_mappers::Entity::find()
-        .filter(client_scope_protocol_mappers::Column::ClientScopeId.is_in(scope_ids.to_vec()))
-        .order_by_asc(client_scope_protocol_mappers::Column::CreatedAt)
-        .order_by_asc(client_scope_protocol_mappers::Column::Id)
+        .filter(COLUMN.client_scope_id.is_in(scope_ids.to_vec()))
+        .order_by_asc(COLUMN.created_at)
+        .order_by_asc(COLUMN.id)
         .all(db)
         .await
         .map_err(|e| {

@@ -43,23 +43,23 @@ fn listing_select(
     realm_id: Uuid,
     filter: &FederationProviderFilter,
 ) -> Select<user_federation_providers::Entity> {
-    use user_federation_providers::Column;
+    use user_federation_providers::COLUMN;
 
     user_federation_providers::Entity::find()
-        .filter(Column::RealmId.eq(realm_id))
-        .filter(within(Column::CreatedAt, &filter.created))
+        .filter(COLUMN.realm_id.eq(realm_id))
+        .filter(within(COLUMN.created_at, &filter.created))
         .apply_if(filter.search.as_deref(), |select, value| {
-            select.filter(contains(Column::Name, value))
+            select.filter(contains(COLUMN.name, value))
         })
         .apply_if(filter.name.as_deref(), |select, value| {
-            select.filter(contains(Column::Name, value))
+            select.filter(contains(COLUMN.name, value))
         })
         .apply_if(filter.provider_type.as_deref(), |select, value| {
-            select.filter(Column::ProviderType.eq(value))
+            select.filter(COLUMN.provider_type.eq(value))
         })
         .apply_if(filter.provider_family, |select, family| {
             select.filter(
-                Column::ProviderType.is_in(
+                COLUMN.provider_type.is_in(
                     family
                         .provider_types()
                         .iter()
@@ -68,19 +68,19 @@ fn listing_select(
             )
         })
         .apply_if(filter.enabled, |select, value| {
-            select.filter(Column::Enabled.eq(value))
+            select.filter(COLUMN.enabled.eq(value))
         })
         .apply_if(filter.sync_enabled, |select, value| {
-            select.filter(Column::SyncEnabled.eq(value))
+            select.filter(COLUMN.sync_enabled.eq(value))
         })
         .apply_if(filter.sync_mode, |select, value| {
-            select.filter(Column::SyncMode.eq(value.to_string()))
+            select.filter(COLUMN.sync_mode.eq(value.to_string()))
         })
         .apply_if(filter.synced, |select, value| {
             select.filter(if value {
-                Column::LastSyncAt.is_not_null()
+                COLUMN.last_sync_at.is_not_null()
             } else {
-                Column::LastSyncAt.is_null()
+                COLUMN.last_sync_at.is_null()
             })
         })
 }
@@ -373,9 +373,10 @@ impl FederationRepository for FederationRepositoryImpl {
     ) -> Result<Option<FederationMapping>, CoreError> {
         let model = user_federation_mappings::Entity::find()
             .filter(
-                user_federation_mappings::Column::ProviderId
+                user_federation_mappings::COLUMN
+                    .provider_id
                     .eq(provider.get().id)
-                    .and(user_federation_mappings::Column::ExternalId.eq(external_id)),
+                    .and(user_federation_mappings::COLUMN.external_id.eq(external_id)),
             )
             .one(&self.db)
             .await
@@ -392,7 +393,11 @@ impl FederationRepository for FederationRepositoryImpl {
         provider: &Scoped<FederationProvider>,
     ) -> Result<Vec<FederationMapping>, CoreError> {
         let models = user_federation_mappings::Entity::find()
-            .filter(user_federation_mappings::Column::ProviderId.eq(provider.get().id))
+            .filter(
+                user_federation_mappings::COLUMN
+                    .provider_id
+                    .eq(provider.get().id),
+            )
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -407,7 +412,7 @@ impl FederationRepository for FederationRepositoryImpl {
         user_id: Uuid,
     ) -> Result<Option<FederationMapping>, CoreError> {
         let model = user_federation_mappings::Entity::find()
-            .filter(user_federation_mappings::Column::UserId.eq(user_id))
+            .filter(user_federation_mappings::COLUMN.user_id.eq(user_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -429,8 +434,12 @@ impl FederationRepository for FederationRepositoryImpl {
         mapping: FederationMapping,
     ) -> Result<FederationMapping, CoreError> {
         let model = user_federation_mappings::Entity::find()
-            .filter(user_federation_mappings::Column::Id.eq(mapping.id))
-            .filter(user_federation_mappings::Column::ProviderId.eq(provider.get().id))
+            .filter(user_federation_mappings::COLUMN.id.eq(mapping.id))
+            .filter(
+                user_federation_mappings::COLUMN
+                    .provider_id
+                    .eq(provider.get().id),
+            )
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -461,8 +470,12 @@ impl FederationRepository for FederationRepositoryImpl {
         id: Uuid,
     ) -> Result<(), CoreError> {
         user_federation_mappings::Entity::delete_many()
-            .filter(user_federation_mappings::Column::Id.eq(id))
-            .filter(user_federation_mappings::Column::ProviderId.eq(provider.get().id))
+            .filter(user_federation_mappings::COLUMN.id.eq(id))
+            .filter(
+                user_federation_mappings::COLUMN
+                    .provider_id
+                    .eq(provider.get().id),
+            )
             .exec(&self.db)
             .await
             .map_err(|e| {

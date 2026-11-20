@@ -1,11 +1,12 @@
+use crate::entity::portal_layouts;
 use sea_orm::ExprTrait;
 use std::collections::HashMap;
 
 use chrono::{TimeZone, Utc};
 use sea_orm::{
     ActiveValue::Set,
-    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect,
-    QueryTrait, Select, TransactionTrait,
+    DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, QueryTrait, Select,
+    TransactionTrait,
     sea_query::{Expr, Query, SimpleExpr},
 };
 use tracing::error;
@@ -74,11 +75,11 @@ fn used_by_a_theme(realm_id: Uuid) -> SimpleExpr {
             .expr(Expr::val(1))
             .from(portal_themes::Entity)
             .and_where(
-                Expr::col((portal_themes::Entity, portal_themes::Column::LayoutId))
-                    .equals((Entity, Column::Id)),
+                Expr::col((portal_themes::Entity, portal_themes::COLUMN.layout_id))
+                    .equals((Entity, portal_layouts::COLUMN.id)),
             )
             .and_where(
-                Expr::col((portal_themes::Entity, portal_themes::Column::RealmId)).eq(realm_id),
+                Expr::col((portal_themes::Entity, portal_themes::COLUMN.realm_id)).eq(realm_id),
             )
             .to_owned(),
     )
@@ -86,16 +87,19 @@ fn used_by_a_theme(realm_id: Uuid) -> SimpleExpr {
 
 fn listing_select(realm_id: Uuid, filter: &PortalLayoutFilter) -> Select<Entity> {
     Entity::find()
-        .filter(Column::RealmId.eq(realm_id))
-        .filter(within_naive(Column::CreatedAt, &filter.created))
+        .filter(portal_layouts::COLUMN.realm_id.eq(realm_id))
+        .filter(within_naive(
+            portal_layouts::COLUMN.created_at,
+            &filter.created,
+        ))
         .apply_if(filter.search.as_deref(), |select, value| {
-            select.filter(contains(Column::Name, value))
+            select.filter(contains(portal_layouts::COLUMN.name, value))
         })
         .apply_if(filter.name.as_deref(), |select, value| {
-            select.filter(contains(Column::Name, value))
+            select.filter(contains(portal_layouts::COLUMN.name, value))
         })
         .apply_if(filter.is_default, |select, value| {
-            select.filter(Column::IsDefault.eq(value))
+            select.filter(portal_layouts::COLUMN.is_default.eq(value))
         })
         .apply_if(filter.in_use, |select, in_use| {
             select.filter(if in_use {
@@ -105,7 +109,7 @@ fn listing_select(realm_id: Uuid, filter: &PortalLayoutFilter) -> Select<Entity>
             })
         })
         .apply_if(filter.ids.as_deref(), |select, ids| {
-            select.filter(Column::Id.is_in(ids.iter().copied()))
+            select.filter(portal_layouts::COLUMN.id.is_in(ids.iter().copied()))
         })
 }
 
@@ -113,10 +117,10 @@ fn theme_count_select(realm_id: Uuid, layout_ids: Vec<Uuid>) -> Select<portal_th
     portal_themes::Entity::find()
         .select_only()
         .column(portal_themes::Column::LayoutId)
-        .column_as(portal_themes::Column::Id.count(), "theme_count")
-        .filter(portal_themes::Column::RealmId.eq(realm_id))
-        .filter(portal_themes::Column::LayoutId.is_in(layout_ids))
-        .group_by(portal_themes::Column::LayoutId)
+        .column_as(portal_themes::COLUMN.id.count(), "theme_count")
+        .filter(portal_themes::COLUMN.realm_id.eq(realm_id))
+        .filter(portal_themes::COLUMN.layout_id.is_in(layout_ids))
+        .group_by(portal_themes::COLUMN.layout_id)
 }
 
 impl PostgresPortalLayoutsRepository {
@@ -182,7 +186,7 @@ impl PortalLayoutsRepository for PostgresPortalLayoutsRepository {
         layout_id: Uuid,
     ) -> Result<Option<Unscoped<PortalLayout>>, CoreError> {
         let model = Entity::find_by_id(layout_id)
-            .filter(Column::RealmId.eq(realm_id))
+            .filter(portal_layouts::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -195,8 +199,8 @@ impl PortalLayoutsRepository for PostgresPortalLayoutsRepository {
 
     async fn get_default(&self, realm_id: Uuid) -> Result<Option<PortalLayout>, CoreError> {
         let model = Entity::find()
-            .filter(Column::RealmId.eq(realm_id))
-            .filter(Column::IsDefault.eq(true))
+            .filter(portal_layouts::COLUMN.realm_id.eq(realm_id))
+            .filter(portal_layouts::COLUMN.is_default.eq(true))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -243,7 +247,11 @@ impl PortalLayoutsRepository for PostgresPortalLayoutsRepository {
         tree: serde_json::Value,
     ) -> Result<PortalLayout, CoreError> {
         let existing = Entity::find_by_id(layout.get().id)
-            .filter(Column::RealmId.eq::<Uuid>(layout.get().realm_id.into()))
+            .filter(
+                portal_layouts::COLUMN
+                    .realm_id
+                    .eq::<Uuid>(layout.get().realm_id.into()),
+            )
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -276,7 +284,7 @@ impl PortalLayoutsRepository for PostgresPortalLayoutsRepository {
 
         // Confirm the target layout exists in this realm.
         let target = Entity::find_by_id(layout_id)
-            .filter(Column::RealmId.eq(realm_id))
+            .filter(portal_layouts::COLUMN.realm_id.eq(realm_id))
             .one(&txn)
             .await
             .map_err(|e| {
@@ -289,10 +297,16 @@ impl PortalLayoutsRepository for PostgresPortalLayoutsRepository {
 
         // Clear any current default in the realm (no-op if none).
         Entity::update_many()
-            .col_expr(Column::IsDefault, sea_orm::sea_query::Expr::value(false))
-            .col_expr(Column::UpdatedAt, sea_orm::sea_query::Expr::value(now))
-            .filter(Column::RealmId.eq(realm_id))
-            .filter(Column::IsDefault.eq(true))
+            .col_expr(
+                portal_layouts::COLUMN.is_default,
+                sea_orm::sea_query::Expr::value(false),
+            )
+            .col_expr(
+                portal_layouts::COLUMN.updated_at,
+                sea_orm::sea_query::Expr::value(now),
+            )
+            .filter(portal_layouts::COLUMN.realm_id.eq(realm_id))
+            .filter(portal_layouts::COLUMN.is_default.eq(true))
             .exec(&txn)
             .await
             .map_err(|e| {
@@ -319,8 +333,12 @@ impl PortalLayoutsRepository for PostgresPortalLayoutsRepository {
 
     async fn delete(&self, layout: &Scoped<PortalLayout>) -> Result<(), CoreError> {
         let result = Entity::delete_many()
-            .filter(Column::Id.eq(layout.get().id))
-            .filter(Column::RealmId.eq::<Uuid>(layout.get().realm_id.into()))
+            .filter(portal_layouts::COLUMN.id.eq(layout.get().id))
+            .filter(
+                portal_layouts::COLUMN
+                    .realm_id
+                    .eq::<Uuid>(layout.get().realm_id.into()),
+            )
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -337,8 +355,12 @@ impl PortalLayoutsRepository for PostgresPortalLayoutsRepository {
 
     async fn is_used_by_themes(&self, layout: &Scoped<PortalLayout>) -> Result<bool, CoreError> {
         let count = portal_themes::Entity::find()
-            .filter(portal_themes::Column::RealmId.eq::<Uuid>(layout.get().realm_id.into()))
-            .filter(portal_themes::Column::LayoutId.eq(layout.get().id))
+            .filter(
+                portal_themes::COLUMN
+                    .realm_id
+                    .eq::<Uuid>(layout.get().realm_id.into()),
+            )
+            .filter(portal_themes::COLUMN.layout_id.eq(layout.get().id))
             .count(&self.db)
             .await
             .map_err(|e| {
@@ -358,7 +380,7 @@ impl PortalLayoutsRepository for PostgresPortalLayoutsRepository {
         let realm_id: Uuid = layout.get().realm_id.into();
 
         let settings = realm_settings::Entity::find()
-            .filter(realm_settings::Column::RealmId.eq(realm_id))
+            .filter(realm_settings::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -371,9 +393,9 @@ impl PortalLayoutsRepository for PostgresPortalLayoutsRepository {
         };
 
         let count = portal_themes::Entity::find()
-            .filter(portal_themes::Column::Id.eq(theme_id))
-            .filter(portal_themes::Column::RealmId.eq(realm_id))
-            .filter(portal_themes::Column::LayoutId.eq(layout.get().id))
+            .filter(portal_themes::COLUMN.id.eq(theme_id))
+            .filter(portal_themes::COLUMN.realm_id.eq(realm_id))
+            .filter(portal_themes::COLUMN.layout_id.eq(layout.get().id))
             .count(&self.db)
             .await
             .map_err(|e| {

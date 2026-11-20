@@ -1,8 +1,9 @@
+use crate::entity::access_tokens::COLUMN;
 use chrono::{DateTime, TimeZone, Utc};
 use sea_orm::sea_query::{Expr, OnConflict, Query};
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection, DbBackend, EntityTrait,
-    QueryFilter, Statement,
+    ActiveValue::Set, ConnectionTrait, DatabaseConnection, DbBackend, EntityTrait, QueryFilter,
+    Statement,
 };
 use uuid::Uuid;
 
@@ -86,7 +87,7 @@ impl AccessTokenRepository for PostgresAccessTokenRepository {
         token_hash: String,
     ) -> Result<Option<Unscoped<AccessToken>>, JwtError> {
         let access_token = crate::entity::access_tokens::Entity::find()
-            .filter(crate::entity::access_tokens::Column::TokenHash.eq(token_hash))
+            .filter(COLUMN.token_hash.eq(token_hash))
             .one(&self.db)
             .await
             .map_err(|e| JwtError::GenerationError(e.to_string()))?;
@@ -96,10 +97,7 @@ impl AccessTokenRepository for PostgresAccessTokenRepository {
 
     async fn revoke_by_session_id(&self, session_id: Uuid) -> Result<u64, JwtError> {
         let result = crate::entity::access_tokens::Entity::update_many()
-            .col_expr(
-                crate::entity::access_tokens::Column::Revoked,
-                Expr::value(true),
-            )
+            .col_expr(COLUMN.revoked, Expr::value(true))
             .filter(Expr::cust_with_values(
                 "claims ->> 'sid' = $1",
                 [session_id.to_string()],
@@ -125,13 +123,13 @@ impl AccessTokenRepository for PostgresAccessTokenRepository {
 
     async fn delete_expired(&self, before: DateTime<Utc>, limit: u64) -> Result<u64, JwtError> {
         let oldest = Query::select()
-            .column(crate::entity::access_tokens::Column::Id)
+            .column(COLUMN.id)
             .from(crate::entity::access_tokens::Entity)
-            .and_where(crate::entity::access_tokens::Column::ExpiresAt.lt(before.naive_utc()))
+            .and_where(COLUMN.expires_at.lt(before.naive_utc()))
             .limit(limit)
             .to_owned();
         let result = crate::entity::access_tokens::Entity::delete_many()
-            .filter(crate::entity::access_tokens::Column::Id.in_subquery(oldest))
+            .filter(COLUMN.id.in_subquery(oldest))
             .exec(&self.db)
             .await
             .map_err(|e| JwtError::GenerationError(e.to_string()))?;
@@ -141,11 +139,8 @@ impl AccessTokenRepository for PostgresAccessTokenRepository {
 
     async fn revoke_all_for_user(&self, user_id: Uuid) -> Result<u64, JwtError> {
         let result = crate::entity::access_tokens::Entity::update_many()
-            .col_expr(
-                crate::entity::access_tokens::Column::Revoked,
-                Expr::value(true),
-            )
-            .filter(crate::entity::access_tokens::Column::UserId.eq(user_id))
+            .col_expr(COLUMN.revoked, Expr::value(true))
+            .filter(COLUMN.user_id.eq(user_id))
             .exec(&self.db)
             .await
             .map_err(|e| JwtError::GenerationError(e.to_string()))?;
@@ -223,8 +218,8 @@ impl AccessTokenRepository for PostgresAccessTokenRepository {
 
         access_tokens::Entity::insert(row)
             .on_conflict(
-                OnConflict::column(access_tokens::Column::TokenHash)
-                    .update_column(access_tokens::Column::Revoked)
+                OnConflict::column(COLUMN.token_hash)
+                    .update_column(COLUMN.revoked)
                     .to_owned(),
             )
             .exec_without_returning(&self.db)

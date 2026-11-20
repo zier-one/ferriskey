@@ -1,3 +1,4 @@
+use crate::entity::organizations::COLUMN;
 use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::ExprTrait;
@@ -168,7 +169,7 @@ impl OrganizationMemberRepository for PostgresOrganizationMemberRepository {
         let models = MemberEntity::find()
             .filter(MemberColumn::UserId.eq(user_id))
             .inner_join(crate::entity::organizations::Entity)
-            .filter(crate::entity::organizations::Column::RealmId.eq(Uuid::from(realm_id)))
+            .filter(COLUMN.realm_id.eq(Uuid::from(realm_id)))
             .all(&self.db)
             .await
             .map_err(|e| {

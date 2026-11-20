@@ -1,4 +1,5 @@
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
+use crate::entity::compass_flow_steps::COLUMN;
+use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use uuid::Uuid;
 
 use ferriskey_compass::{entities::CompassFlowStep, ports::CompassFlowStepRepository};
@@ -20,8 +21,8 @@ impl PostgresCompassFlowStepRepository {
 impl CompassFlowStepRepository for PostgresCompassFlowStepRepository {
     async fn get_steps_for_flow(&self, flow_id: Uuid) -> Result<Vec<CompassFlowStep>, CoreError> {
         let models = compass_flow_steps::Entity::find()
-            .filter(compass_flow_steps::Column::FlowId.eq(flow_id))
-            .order_by_asc(compass_flow_steps::Column::StartedAt)
+            .filter(COLUMN.flow_id.eq(flow_id))
+            .order_by_asc(COLUMN.started_at)
             .all(&self.db)
             .await
             .map_err(|e| {

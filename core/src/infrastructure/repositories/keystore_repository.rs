@@ -1,3 +1,4 @@
+use crate::entity::jwt_keys::COLUMN;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, RwLock};
@@ -11,8 +12,8 @@ use ferriskey_security::jwt::signing_keys::{
 };
 use sea_orm::{
     ActiveValue::Set,
-    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, TransactionTrait,
+    ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait,
     sea_query::{Expr, OnConflict},
 };
 use uuid::Uuid;
@@ -94,8 +95,8 @@ fn storage_error(error: sea_orm::DbErr) -> JwtError {
 
 fn active_key_filter() -> sea_orm::Condition {
     sea_orm::Condition::all()
-        .add(jwt_keys::Column::RotatedAt.is_null())
-        .add(jwt_keys::Column::RevokedAt.is_null())
+        .add(COLUMN.rotated_at.is_null())
+        .add(COLUMN.revoked_at.is_null())
 }
 
 impl PostgresKeyStoreRepository {
@@ -187,14 +188,14 @@ impl PostgresKeyStoreRepository {
         now: DateTime<Utc>,
     ) -> Result<Vec<jwt_keys::Model>, JwtError> {
         jwt_keys::Entity::find()
-            .filter(jwt_keys::Column::RealmId.eq(realm_id))
-            .filter(jwt_keys::Column::RevokedAt.is_null())
+            .filter(COLUMN.realm_id.eq(realm_id))
+            .filter(COLUMN.revoked_at.is_null())
             .filter(
                 sea_orm::Condition::any()
-                    .add(jwt_keys::Column::RetireAt.is_null())
-                    .add(jwt_keys::Column::RetireAt.gt(now.naive_utc())),
+                    .add(COLUMN.retire_at.is_null())
+                    .add(COLUMN.retire_at.gt(now.naive_utc())),
             )
-            .order_by_desc(jwt_keys::Column::CreatedAt)
+            .order_by_desc(COLUMN.created_at)
             .all(&self.db)
             .await
             .map_err(|_| JwtError::RealmKeyNotFound)
@@ -247,7 +248,7 @@ impl PostgresKeyStoreRepository {
 
         jwt_keys::Entity::insert(new_key)
             .on_conflict(
-                OnConflict::column(jwt_keys::Column::RealmId)
+                OnConflict::column(COLUMN.realm_id)
                     .target_cond_where(active_key_filter())
                     .do_nothing()
                     .to_owned(),
@@ -268,9 +269,9 @@ impl PostgresKeyStoreRepository {
         let certificate = JwtKeyPair::self_signed_certificate(&private_key, &common_name)?;
 
         jwt_keys::Entity::update_many()
-            .col_expr(jwt_keys::Column::Certificate, Expr::value(certificate))
-            .filter(jwt_keys::Column::Id.eq(key.id))
-            .filter(jwt_keys::Column::Certificate.is_null())
+            .col_expr(COLUMN.certificate, Expr::value(certificate))
+            .filter(COLUMN.id.eq(key.id))
+            .filter(COLUMN.certificate.is_null())
             .exec(&self.db)
             .await
             .map_err(storage_error)?;
@@ -376,8 +377,8 @@ impl SigningKeyRepository for PostgresKeyStoreRepository {
         let now = Utc::now();
 
         let keys = jwt_keys::Entity::find()
-            .filter(jwt_keys::Column::RealmId.eq(Uuid::from(realm_id)))
-            .order_by_desc(jwt_keys::Column::CreatedAt)
+            .filter(COLUMN.realm_id.eq(Uuid::from(realm_id)))
+            .order_by_desc(COLUMN.created_at)
             .all(&self.db)
             .await
             .map_err(storage_error)?;
@@ -397,12 +398,9 @@ impl SigningKeyRepository for PostgresKeyStoreRepository {
         let realm = self.lock_realm(&transaction, realm_id).await?;
 
         jwt_keys::Entity::update_many()
-            .col_expr(jwt_keys::Column::RotatedAt, Expr::value(now.naive_utc()))
-            .col_expr(
-                jwt_keys::Column::RetireAt,
-                Expr::value((now + grace).naive_utc()),
-            )
-            .filter(jwt_keys::Column::RealmId.eq(realm_id))
+            .col_expr(COLUMN.rotated_at, Expr::value(now.naive_utc()))
+            .col_expr(COLUMN.retire_at, Expr::value((now + grace).naive_utc()))
+            .filter(COLUMN.realm_id.eq(realm_id))
             .filter(active_key_filter())
             .exec(&transaction)
             .await
@@ -431,7 +429,7 @@ impl SigningKeyRepository for PostgresKeyStoreRepository {
         let realm = self.lock_realm(&transaction, realm_id).await?;
 
         let Some(key) = jwt_keys::Entity::find_by_id(kid)
-            .filter(jwt_keys::Column::RealmId.eq(realm_id))
+            .filter(COLUMN.realm_id.eq(realm_id))
             .one(&transaction)
             .await
             .map_err(storage_error)?

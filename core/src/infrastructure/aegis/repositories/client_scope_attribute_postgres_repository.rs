@@ -1,6 +1,5 @@
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use crate::entity::client_scope_attributes::COLUMN;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::domain::aegis::entities::ClientScopeAttribute;
@@ -30,8 +29,8 @@ impl ClientScopeAttributeRepository for PostgresClientScopeAttributeRepository {
         value: Option<String>,
     ) -> Result<ClientScopeAttribute, CoreError> {
         let existing = client_scope_attributes::Entity::find()
-            .filter(client_scope_attributes::Column::ClientScopeId.eq(scope_id))
-            .filter(client_scope_attributes::Column::Name.eq(&name))
+            .filter(COLUMN.client_scope_id.eq(scope_id))
+            .filter(COLUMN.name.eq(&name))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -64,7 +63,7 @@ impl ClientScopeAttributeRepository for PostgresClientScopeAttributeRepository {
 
     async fn get_attributes(&self, scope_id: Uuid) -> Result<Vec<ClientScopeAttribute>, CoreError> {
         let models = client_scope_attributes::Entity::find()
-            .filter(client_scope_attributes::Column::ClientScopeId.eq(scope_id))
+            .filter(COLUMN.client_scope_id.eq(scope_id))
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -77,8 +76,8 @@ impl ClientScopeAttributeRepository for PostgresClientScopeAttributeRepository {
 
     async fn remove_attribute(&self, scope_id: Uuid, name: String) -> Result<(), CoreError> {
         let result = client_scope_attributes::Entity::delete_many()
-            .filter(client_scope_attributes::Column::ClientScopeId.eq(scope_id))
-            .filter(client_scope_attributes::Column::Name.eq(name))
+            .filter(COLUMN.client_scope_id.eq(scope_id))
+            .filter(COLUMN.name.eq(name))
             .exec(&self.db)
             .await
             .map_err(|e| {

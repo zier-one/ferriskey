@@ -1,3 +1,4 @@
+use crate::entity::credentials::COLUMN;
 use crate::{
     domain::credential::entities::CredentialType,
     entity::credentials::{ActiveModel, Entity as CredentialEntity},
@@ -7,7 +8,7 @@ use ferriskey_security::crypto::secret_cipher::SecretCipher;
 use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
-    ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, ModelTrait, QueryFilter,
+    DatabaseConnection, EntityTrait, IntoActiveModel, ModelTrait, QueryFilter,
     sea_query::{Expr, OnConflict},
 };
 use serde_json::Value;
@@ -141,8 +142,8 @@ impl CredentialRepository for PostgresCredentialRepository {
         user_id: uuid::Uuid,
     ) -> Result<Credential, CredentialError> {
         let credential = CredentialEntity::find()
-            .filter(crate::entity::credentials::Column::UserId.eq(user_id))
-            .filter(crate::entity::credentials::Column::CredentialType.eq("password"))
+            .filter(COLUMN.user_id.eq(user_id))
+            .filter(COLUMN.credential_type.eq("password"))
             .one(&self.db)
             .await
             .map_err(|_| CredentialError::GetPasswordCredentialError)?
@@ -172,32 +173,14 @@ impl CredentialRepository for PostgresCredentialRepository {
         })?;
 
         let result = CredentialEntity::update_many()
-            .col_expr(
-                crate::entity::credentials::Column::SecretData,
-                Expr::value(hash_result.hash),
-            )
-            .col_expr(
-                crate::entity::credentials::Column::Salt,
-                Expr::value(hash_result.salt),
-            )
-            .col_expr(
-                crate::entity::credentials::Column::CredentialData,
-                Expr::value(credential_data),
-            )
-            .col_expr(
-                crate::entity::credentials::Column::Temporary,
-                Expr::value(temporary),
-            )
-            .col_expr(
-                crate::entity::credentials::Column::UpdatedAt,
-                Expr::value(now.naive_utc()),
-            )
-            .filter(crate::entity::credentials::Column::UserId.eq(user_id))
-            .filter(
-                crate::entity::credentials::Column::CredentialType
-                    .eq(CredentialType::Password.as_str()),
-            )
-            .filter(crate::entity::credentials::Column::SecretData.eq(expected_secret_data))
+            .col_expr(COLUMN.secret_data, Expr::value(hash_result.hash))
+            .col_expr(COLUMN.salt, Expr::value(hash_result.salt))
+            .col_expr(COLUMN.credential_data, Expr::value(credential_data))
+            .col_expr(COLUMN.temporary, Expr::value(temporary))
+            .col_expr(COLUMN.updated_at, Expr::value(now.naive_utc()))
+            .filter(COLUMN.user_id.eq(user_id))
+            .filter(COLUMN.credential_type.eq(CredentialType::Password.as_str()))
+            .filter(COLUMN.secret_data.eq(expected_secret_data))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -214,11 +197,8 @@ impl CredentialRepository for PostgresCredentialRepository {
 
     async fn has_password_credential(&self, user_id: uuid::Uuid) -> Result<bool, CredentialError> {
         CredentialEntity::find()
-            .filter(crate::entity::credentials::Column::UserId.eq(user_id))
-            .filter(
-                crate::entity::credentials::Column::CredentialType
-                    .eq(CredentialType::Password.as_str()),
-            )
+            .filter(COLUMN.user_id.eq(user_id))
+            .filter(COLUMN.credential_type.eq(CredentialType::Password.as_str()))
             .one(&self.db)
             .await
             .map(|credential| credential.is_some())
@@ -286,11 +266,8 @@ impl CredentialRepository for PostgresCredentialRepository {
 
     async fn delete_password_credential(&self, user_id: uuid::Uuid) -> Result<(), CredentialError> {
         let credential = CredentialEntity::find()
-            .filter(crate::entity::credentials::Column::UserId.eq(user_id))
-            .filter(
-                crate::entity::credentials::Column::CredentialType
-                    .eq(CredentialType::Password.as_str()),
-            )
+            .filter(COLUMN.user_id.eq(user_id))
+            .filter(COLUMN.credential_type.eq(CredentialType::Password.as_str()))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -312,7 +289,7 @@ impl CredentialRepository for PostgresCredentialRepository {
         user_id: uuid::Uuid,
     ) -> Result<Vec<Credential>, CredentialError> {
         let credentials = CredentialEntity::find()
-            .filter(crate::entity::credentials::Column::UserId.eq(user_id))
+            .filter(COLUMN.user_id.eq(user_id))
             .all(&self.db)
             .await
             .map_err(|_| CredentialError::GetUserCredentialsError)?
@@ -329,8 +306,8 @@ impl CredentialRepository for PostgresCredentialRepository {
         credential_id: uuid::Uuid,
     ) -> Result<(), CredentialError> {
         let credential = CredentialEntity::find()
-            .filter(crate::entity::credentials::Column::Id.eq(credential_id))
-            .filter(crate::entity::credentials::Column::UserId.eq(user.get().id))
+            .filter(COLUMN.id.eq(credential_id))
+            .filter(COLUMN.user_id.eq(user.get().id))
             .one(&self.db)
             .await
             .map_err(|_| CredentialError::DeleteCredentialError)?
@@ -474,9 +451,10 @@ impl CredentialRepository for PostgresCredentialRepository {
         user_id: uuid::Uuid,
     ) -> Result<Vec<Credential>, CredentialError> {
         let credentials = CredentialEntity::find()
-            .filter(crate::entity::credentials::Column::UserId.eq(user_id))
+            .filter(COLUMN.user_id.eq(user_id))
             .filter(
-                crate::entity::credentials::Column::CredentialType
+                COLUMN
+                    .credential_type
                     .eq(CredentialType::WebAuthnPublicKeyCredential.as_str()),
             )
             .all(&self.db)
@@ -495,8 +473,8 @@ impl CredentialRepository for PostgresCredentialRepository {
         user: &Scoped<User>,
     ) -> Result<Option<Credential>, CredentialError> {
         let credential = CredentialEntity::find()
-            .filter(crate::entity::credentials::Column::WebauthnCredentialId.eq(credential_id))
-            .filter(crate::entity::credentials::Column::UserId.eq(user.get().id))
+            .filter(COLUMN.webauthn_credential_id.eq(credential_id))
+            .filter(COLUMN.user_id.eq(user.get().id))
             .one(&self.db)
             .await
             .map_err(|_| CredentialError::GetUserCredentialsError)?
@@ -513,8 +491,8 @@ impl CredentialRepository for PostgresCredentialRepository {
         let credential_id: &[u8] = auth_result.cred_id().as_slice();
 
         let credential_model = CredentialEntity::find()
-            .filter(crate::entity::credentials::Column::WebauthnCredentialId.eq(credential_id))
-            .filter(crate::entity::credentials::Column::UserId.eq(user.get().id))
+            .filter(COLUMN.webauthn_credential_id.eq(credential_id))
+            .filter(COLUMN.user_id.eq(user.get().id))
             .one(&self.db)
             .await
             .map_err(|_| CredentialError::GetUserCredentialsError)?

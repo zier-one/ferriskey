@@ -2,9 +2,7 @@ use std::collections::HashMap;
 
 use ferriskey_aegis::entities::ScopeType;
 use sea_orm::sea_query::{Query, SelectStatement};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -17,9 +15,9 @@ use crate::entity::{client_scope_mappings, client_scopes, clients};
 
 fn realm_of_client(client_id: Uuid) -> SelectStatement {
     Query::select()
-        .column(clients::Column::RealmId)
+        .column(clients::COLUMN.realm_id)
         .from(clients::Entity)
-        .and_where(clients::Column::Id.eq(client_id))
+        .and_where(clients::COLUMN.id.eq(client_id))
         .to_owned()
 }
 
@@ -54,8 +52,12 @@ impl ClientScopeMappingRepository for PostgresScopeMappingRepository {
         };
 
         client_scopes::Entity::find()
-            .filter(client_scopes::Column::Id.eq(scope_id))
-            .filter(client_scopes::Column::RealmId.in_subquery(realm_of_client(client_id)))
+            .filter(client_scopes::COLUMN.id.eq(scope_id))
+            .filter(
+                client_scopes::COLUMN
+                    .realm_id
+                    .in_subquery(realm_of_client(client_id)),
+            )
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -88,8 +90,12 @@ impl ClientScopeMappingRepository for PostgresScopeMappingRepository {
         client_scope: &Scoped<ClientScope>,
     ) -> Result<(), CoreError> {
         let result = client_scope_mappings::Entity::delete_many()
-            .filter(client_scope_mappings::Column::ClientId.eq(client.get().id))
-            .filter(client_scope_mappings::Column::ClientScopeId.eq(client_scope.get().id))
+            .filter(client_scope_mappings::COLUMN.client_id.eq(client.get().id))
+            .filter(
+                client_scope_mappings::COLUMN
+                    .client_scope_id
+                    .eq(client_scope.get().id),
+            )
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -110,7 +116,7 @@ impl ClientScopeMappingRepository for PostgresScopeMappingRepository {
         client_id: Uuid,
     ) -> Result<Vec<ClientScopeMapping>, CoreError> {
         let models = client_scope_mappings::Entity::find()
-            .filter(client_scope_mappings::Column::ClientId.eq(client_id))
+            .filter(client_scope_mappings::COLUMN.client_id.eq(client_id))
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -124,8 +130,12 @@ impl ClientScopeMappingRepository for PostgresScopeMappingRepository {
     #[instrument(skip(self))]
     async fn get_default_scopes(&self, client_id: Uuid) -> Result<Vec<ClientScope>, CoreError> {
         let mappings = client_scope_mappings::Entity::find()
-            .filter(client_scope_mappings::Column::ClientId.eq(client_id))
-            .filter(client_scope_mappings::Column::DefaultScopeType.eq(ScopeType::Default.as_str()))
+            .filter(client_scope_mappings::COLUMN.client_id.eq(client_id))
+            .filter(
+                client_scope_mappings::COLUMN
+                    .default_scope_type
+                    .eq(ScopeType::Default.as_str()),
+            )
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -140,8 +150,12 @@ impl ClientScopeMappingRepository for PostgresScopeMappingRepository {
         }
 
         let scopes = client_scopes::Entity::find()
-            .filter(client_scopes::Column::Id.is_in(scope_ids))
-            .filter(client_scopes::Column::RealmId.in_subquery(realm_of_client(client_id)))
+            .filter(client_scopes::COLUMN.id.is_in(scope_ids))
+            .filter(
+                client_scopes::COLUMN
+                    .realm_id
+                    .in_subquery(realm_of_client(client_id)),
+            )
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -163,9 +177,10 @@ impl ClientScopeMappingRepository for PostgresScopeMappingRepository {
     #[instrument(skip(self))]
     async fn get_scope_set(&self, client_id: Uuid) -> Result<ClientScopeSet, CoreError> {
         let mappings = client_scope_mappings::Entity::find()
-            .filter(client_scope_mappings::Column::ClientId.eq(client_id))
+            .filter(client_scope_mappings::COLUMN.client_id.eq(client_id))
             .filter(
-                client_scope_mappings::Column::DefaultScopeType
+                client_scope_mappings::COLUMN
+                    .default_scope_type
                     .is_in([ScopeType::Default.as_str(), ScopeType::Optional.as_str()]),
             )
             .all(&self.db)
@@ -185,8 +200,12 @@ impl ClientScopeMappingRepository for PostgresScopeMappingRepository {
             .collect();
 
         let scopes = client_scopes::Entity::find()
-            .filter(client_scopes::Column::Id.is_in(kinds.keys().copied()))
-            .filter(client_scopes::Column::RealmId.in_subquery(realm_of_client(client_id)))
+            .filter(client_scopes::COLUMN.id.is_in(kinds.keys().copied()))
+            .filter(
+                client_scopes::COLUMN
+                    .realm_id
+                    .in_subquery(realm_of_client(client_id)),
+            )
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -213,9 +232,11 @@ impl ClientScopeMappingRepository for PostgresScopeMappingRepository {
 
     async fn get_optional_scopes(&self, client_id: Uuid) -> Result<Vec<ClientScope>, CoreError> {
         let mappings = client_scope_mappings::Entity::find()
-            .filter(client_scope_mappings::Column::ClientId.eq(client_id))
+            .filter(client_scope_mappings::COLUMN.client_id.eq(client_id))
             .filter(
-                client_scope_mappings::Column::DefaultScopeType.eq(ScopeType::Optional.as_str()),
+                client_scope_mappings::COLUMN
+                    .default_scope_type
+                    .eq(ScopeType::Optional.as_str()),
             )
             .all(&self.db)
             .await
@@ -231,8 +252,12 @@ impl ClientScopeMappingRepository for PostgresScopeMappingRepository {
         }
 
         let scopes = client_scopes::Entity::find()
-            .filter(client_scopes::Column::Id.is_in(scope_ids))
-            .filter(client_scopes::Column::RealmId.in_subquery(realm_of_client(client_id)))
+            .filter(client_scopes::COLUMN.id.is_in(scope_ids))
+            .filter(
+                client_scopes::COLUMN
+                    .realm_id
+                    .in_subquery(realm_of_client(client_id)),
+            )
             .all(&self.db)
             .await
             .map_err(|e| {

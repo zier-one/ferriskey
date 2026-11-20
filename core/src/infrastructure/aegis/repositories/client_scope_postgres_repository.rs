@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use chrono::Utc;
 use ferriskey_aegis::entities::ScopeType;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, DatabaseConnection, EntityTrait,
-    QueryFilter, QuerySelect, QueryTrait, Select,
+    ActiveModelTrait, ActiveValue::Set, Condition, DatabaseConnection, EntityTrait, QueryFilter,
+    QuerySelect, QueryTrait, Select,
 };
 use tracing::{error, instrument};
 use uuid::Uuid;
@@ -33,29 +33,29 @@ impl SortColumn<client_scopes::Entity> for ClientScopeSortField {
 
 fn listing_select(realm_id: Uuid, filter: &ClientScopeFilter) -> Select<client_scopes::Entity> {
     client_scopes::Entity::find()
-        .filter(client_scopes::Column::RealmId.eq(realm_id))
+        .filter(client_scopes::COLUMN.realm_id.eq(realm_id))
         .filter(within_naive(
-            client_scopes::Column::CreatedAt,
+            client_scopes::COLUMN.created_at,
             &filter.created,
         ))
         .apply_if(filter.name.as_deref(), |select, value| {
-            select.filter(contains(client_scopes::Column::Name, value))
+            select.filter(contains(client_scopes::COLUMN.name, value))
         })
         .apply_if(filter.description.as_deref(), |select, value| {
-            select.filter(contains(client_scopes::Column::Description, value))
+            select.filter(contains(client_scopes::COLUMN.description, value))
         })
         .apply_if(filter.search.as_deref(), |select, value| {
             select.filter(
                 Condition::any()
-                    .add(contains(client_scopes::Column::Name, value))
-                    .add(contains(client_scopes::Column::Description, value)),
+                    .add(contains(client_scopes::COLUMN.name, value))
+                    .add(contains(client_scopes::COLUMN.description, value)),
             )
         })
         .apply_if(filter.protocol.as_deref(), |select, value| {
-            select.filter(client_scopes::Column::Protocol.eq(value))
+            select.filter(client_scopes::COLUMN.protocol.eq(value))
         })
         .apply_if(filter.default_scope_type.as_ref(), |select, value| {
-            select.filter(client_scopes::Column::DefaultScopeType.eq(value.as_str()))
+            select.filter(client_scopes::COLUMN.default_scope_type.eq(value.as_str()))
         })
         .apply_if(filter.has_protocol_mappers, |select, present| {
             let with_mappers = client_scope_protocol_mappers::Entity::find()
@@ -63,18 +63,18 @@ fn listing_select(realm_id: Uuid, filter: &ClientScopeFilter) -> Select<client_s
                 .column(client_scope_protocol_mappers::Column::ClientScopeId)
                 .into_query();
             select.filter(if present {
-                client_scopes::Column::Id.in_subquery(with_mappers)
+                client_scopes::COLUMN.id.in_subquery(with_mappers)
             } else {
-                client_scopes::Column::Id.not_in_subquery(with_mappers)
+                client_scopes::COLUMN.id.not_in_subquery(with_mappers)
             })
         })
         .apply_if(filter.not_assigned_to_client, |select, client_id| {
             let assigned = client_scope_mappings::Entity::find()
                 .select_only()
                 .column(client_scope_mappings::Column::ClientScopeId)
-                .filter(client_scope_mappings::Column::ClientId.eq(client_id))
+                .filter(client_scope_mappings::COLUMN.client_id.eq(client_id))
                 .into_query();
-            select.filter(client_scopes::Column::Id.not_in_subquery(assigned))
+            select.filter(client_scopes::COLUMN.id.not_in_subquery(assigned))
         })
 }
 
@@ -127,8 +127,8 @@ impl ClientScopeRepository for PostgresClientScopeRepository {
         id: Uuid,
     ) -> Result<Option<Unscoped<ClientScope>>, CoreError> {
         let model = client_scopes::Entity::find()
-            .filter(client_scopes::Column::Id.eq(id))
-            .filter(client_scopes::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(client_scopes::COLUMN.id.eq(id))
+            .filter(client_scopes::COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -142,7 +142,7 @@ impl ClientScopeRepository for PostgresClientScopeRepository {
     #[instrument(skip(self))]
     async fn find_by_realm_id(&self, realm_id: RealmId) -> Result<Vec<ClientScope>, CoreError> {
         let models = client_scopes::Entity::find()
-            .filter(client_scopes::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(client_scopes::COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -196,8 +196,8 @@ impl ClientScopeRepository for PostgresClientScopeRepository {
         realm_id: RealmId,
     ) -> Result<Option<Unscoped<ClientScope>>, CoreError> {
         let model = client_scopes::Entity::find()
-            .filter(client_scopes::Column::Name.eq(name))
-            .filter(client_scopes::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(client_scopes::COLUMN.name.eq(name))
+            .filter(client_scopes::COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -215,8 +215,12 @@ impl ClientScopeRepository for PostgresClientScopeRepository {
         payload: UpdateClientScopeRequest,
     ) -> Result<ClientScope, CoreError> {
         let model = client_scopes::Entity::find()
-            .filter(client_scopes::Column::Id.eq(client_scope.get().id))
-            .filter(client_scopes::Column::RealmId.eq::<Uuid>(client_scope.get().realm_id.into()))
+            .filter(client_scopes::COLUMN.id.eq(client_scope.get().id))
+            .filter(
+                client_scopes::COLUMN
+                    .realm_id
+                    .eq::<Uuid>(client_scope.get().realm_id.into()),
+            )
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -264,8 +268,12 @@ impl ClientScopeRepository for PostgresClientScopeRepository {
     #[instrument(skip(self), fields(scope.id = %client_scope.get().id))]
     async fn delete_by_id(&self, client_scope: &Scoped<ClientScope>) -> Result<(), CoreError> {
         let result = client_scopes::Entity::delete_many()
-            .filter(client_scopes::Column::Id.eq(client_scope.get().id))
-            .filter(client_scopes::Column::RealmId.eq::<Uuid>(client_scope.get().realm_id.into()))
+            .filter(client_scopes::COLUMN.id.eq(client_scope.get().id))
+            .filter(
+                client_scopes::COLUMN
+                    .realm_id
+                    .eq::<Uuid>(client_scope.get().realm_id.into()),
+            )
             .exec(&self.db)
             .await
             .map_err(|e| {

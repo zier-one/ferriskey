@@ -1,10 +1,9 @@
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use crate::entity::client_maintenance_whitelist::COLUMN;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::domain::common::entities::app_errors::CoreError;
-use crate::entity::client_maintenance_whitelist::{ActiveModel, Column, Entity as WhitelistEntity};
+use crate::entity::client_maintenance_whitelist::{ActiveModel, Entity as WhitelistEntity};
 use ferriskey_domain::maintenance::{
     entities::MaintenanceWhitelistEntry, ports::MaintenanceWhitelistRepository,
 };
@@ -75,8 +74,8 @@ impl MaintenanceWhitelistRepository for PostgresMaintenanceWhitelistRepository {
 
     async fn remove(&self, client_id: Uuid, entry_id: Uuid) -> Result<(), CoreError> {
         let result = WhitelistEntity::delete_many()
-            .filter(Column::Id.eq(entry_id))
-            .filter(Column::ClientId.eq(client_id))
+            .filter(COLUMN.id.eq(entry_id))
+            .filter(COLUMN.client_id.eq(client_id))
             .exec(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;
@@ -91,7 +90,7 @@ impl MaintenanceWhitelistRepository for PostgresMaintenanceWhitelistRepository {
         client_id: Uuid,
     ) -> Result<Vec<MaintenanceWhitelistEntry>, CoreError> {
         let models = WhitelistEntity::find()
-            .filter(Column::ClientId.eq(client_id))
+            .filter(COLUMN.client_id.eq(client_id))
             .all(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;
@@ -101,8 +100,8 @@ impl MaintenanceWhitelistRepository for PostgresMaintenanceWhitelistRepository {
 
     async fn get_whitelisted_user_ids(&self, client_id: Uuid) -> Result<Vec<Uuid>, CoreError> {
         let models = WhitelistEntity::find()
-            .filter(Column::ClientId.eq(client_id))
-            .filter(Column::UserId.is_not_null())
+            .filter(COLUMN.client_id.eq(client_id))
+            .filter(COLUMN.user_id.is_not_null())
             .all(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;
@@ -112,8 +111,8 @@ impl MaintenanceWhitelistRepository for PostgresMaintenanceWhitelistRepository {
 
     async fn get_whitelisted_role_ids(&self, client_id: Uuid) -> Result<Vec<Uuid>, CoreError> {
         let models = WhitelistEntity::find()
-            .filter(Column::ClientId.eq(client_id))
-            .filter(Column::RoleId.is_not_null())
+            .filter(COLUMN.client_id.eq(client_id))
+            .filter(COLUMN.role_id.is_not_null())
             .all(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;

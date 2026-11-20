@@ -1,9 +1,11 @@
+use crate::entity::roles;
+use crate::entity::user_role;
+use crate::entity::users;
 use sea_orm::ExprTrait;
 use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
-    ColumnTrait, Condition, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect,
-    RelationTrait,
+    Condition, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
     prelude::Expr,
     sea_query::{DynIden, Query, SimpleExpr},
 };
@@ -45,8 +47,8 @@ impl UserRoleRepository for PostgresUserRoleRepository {
         let rows = crate::entity::user_role::Entity::delete_many()
             .filter(
                 Condition::all()
-                    .add(crate::entity::user_role::Column::UserId.eq(user_id))
-                    .add(crate::entity::user_role::Column::RoleId.eq(role_id)),
+                    .add(user_role::COLUMN.user_id.eq(user_id))
+                    .add(user_role::COLUMN.role_id.eq(role_id)),
             )
             .exec(&self.db)
             .await
@@ -69,9 +71,9 @@ impl UserRoleRepository for PostgresUserRoleRepository {
     async fn get_service_account_roles(&self, client_id: Uuid) -> Result<Vec<Role>, CoreError> {
         self.roles_of_users(move |user_column| {
             let service_account = Query::select()
-                .column(crate::entity::users::Column::Id)
+                .column(users::COLUMN.id)
                 .from(crate::entity::users::Entity)
-                .and_where(crate::entity::users::Column::ClientId.eq(client_id))
+                .and_where(users::COLUMN.client_id.eq(client_id))
                 .to_owned();
             Expr::col(user_column).in_subquery(service_account)
         })
@@ -84,7 +86,7 @@ impl UserRoleRepository for PostgresUserRoleRepository {
         }
 
         let roles = crate::entity::roles::Entity::find()
-            .filter(crate::entity::roles::Column::Id.is_in(role_ids))
+            .filter(roles::COLUMN.id.is_in(role_ids))
             .join(
                 JoinType::LeftJoin,
                 crate::entity::roles::Relation::Clients.def(),

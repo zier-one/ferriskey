@@ -1,8 +1,8 @@
+use crate::entity::user_required_actions::COLUMN;
 use chrono::NaiveDateTime;
 use sea_orm::ExprTrait;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait,
-    QueryFilter,
+    ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
 };
 use uuid::Uuid;
 
@@ -53,7 +53,7 @@ impl UserRequiredActionRepository for PostgresUserRequiredActionRepository {
         user_id: Uuid,
     ) -> Result<Vec<RequiredAction>, RequiredActionError> {
         let actions = UserRequiredActionsEntity::find()
-            .filter(crate::entity::user_required_actions::Column::UserId.eq(user_id))
+            .filter(COLUMN.user_id.eq(user_id))
             .all(&self.db)
             .await
             .map_err(|_| RequiredActionError::InternalServerError)?;
@@ -78,11 +78,10 @@ impl UserRequiredActionRepository for PostgresUserRequiredActionRepository {
     ) -> Result<(), RequiredActionError> {
         let action = UserRequiredActionsEntity::find()
             .filter(
-                crate::entity::user_required_actions::Column::UserId
+                COLUMN
+                    .user_id
                     .eq(user_id)
-                    .and(
-                        crate::entity::user_required_actions::Column::Action.eq(action.to_string()),
-                    ),
+                    .and(COLUMN.action.eq(action.to_string())),
             )
             .one(&self.db)
             .await
@@ -99,7 +98,7 @@ impl UserRequiredActionRepository for PostgresUserRequiredActionRepository {
 
     async fn clear_required_actions(&self, user_id: Uuid) -> Result<u64, RequiredActionError> {
         let rows_affected = UserRequiredActionsEntity::delete_many()
-            .filter(crate::entity::user_required_actions::Column::UserId.eq(user_id))
+            .filter(COLUMN.user_id.eq(user_id))
             .exec(&self.db)
             .await
             .map_err(|_| RequiredActionError::InternalServerError)?

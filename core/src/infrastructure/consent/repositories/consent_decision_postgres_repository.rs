@@ -1,6 +1,6 @@
 use chrono::{TimeZone, Utc};
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
+    ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
     sea_query::OnConflict,
 };
 use uuid::Uuid;
@@ -68,9 +68,9 @@ impl ConsentDecisionRepository for PostgresConsentDecisionRepository {
         let realm_id: Uuid = realm_id.into();
 
         let model = consent_sessions::Entity::find()
-            .filter(consent_sessions::Column::RealmId.eq(realm_id))
-            .filter(consent_sessions::Column::UserId.eq(user_id))
-            .filter(consent_sessions::Column::ClientId.eq(client_id))
+            .filter(consent_sessions::COLUMN.realm_id.eq(realm_id))
+            .filter(consent_sessions::COLUMN.user_id.eq(user_id))
+            .filter(consent_sessions::COLUMN.client_id.eq(client_id))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;
@@ -80,7 +80,11 @@ impl ConsentDecisionRepository for PostgresConsentDecisionRepository {
         };
 
         let scopes = consent_session_scopes::Entity::find()
-            .filter(consent_session_scopes::Column::ConsentSessionId.eq(model.id))
+            .filter(
+                consent_session_scopes::COLUMN
+                    .consent_session_id
+                    .eq(model.id),
+            )
             .all(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;
@@ -108,13 +112,13 @@ impl ConsentDecisionRepository for PostgresConsentDecisionRepository {
         let model = consent_sessions::Entity::insert(payload)
             .on_conflict(
                 OnConflict::columns([
-                    consent_sessions::Column::RealmId,
-                    consent_sessions::Column::UserId,
-                    consent_sessions::Column::ClientId,
+                    consent_sessions::COLUMN.realm_id,
+                    consent_sessions::COLUMN.user_id,
+                    consent_sessions::COLUMN.client_id,
                 ])
                 .update_columns([
-                    consent_sessions::Column::ExpiresAt,
-                    consent_sessions::Column::UpdatedAt,
+                    consent_sessions::COLUMN.expires_at,
+                    consent_sessions::COLUMN.updated_at,
                 ])
                 .to_owned(),
             )
@@ -123,7 +127,11 @@ impl ConsentDecisionRepository for PostgresConsentDecisionRepository {
             .map_err(|_| CoreError::InternalServerError)?;
 
         consent_session_scopes::Entity::delete_many()
-            .filter(consent_session_scopes::Column::ConsentSessionId.eq(model.id))
+            .filter(
+                consent_session_scopes::COLUMN
+                    .consent_session_id
+                    .eq(model.id),
+            )
             .exec(&transaction)
             .await
             .map_err(|_| CoreError::InternalServerError)?;
@@ -137,7 +145,11 @@ impl ConsentDecisionRepository for PostgresConsentDecisionRepository {
         }
 
         let scopes = consent_session_scopes::Entity::find()
-            .filter(consent_session_scopes::Column::ConsentSessionId.eq(model.id))
+            .filter(
+                consent_session_scopes::COLUMN
+                    .consent_session_id
+                    .eq(model.id),
+            )
             .all(&transaction)
             .await
             .map_err(|_| CoreError::InternalServerError)?;
@@ -154,7 +166,7 @@ impl ConsentDecisionRepository for PostgresConsentDecisionRepository {
         let realm_id: Uuid = realm_id.into();
 
         let model = realm_settings::Entity::find()
-            .filter(realm_settings::Column::RealmId.eq(realm_id))
+            .filter(realm_settings::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;

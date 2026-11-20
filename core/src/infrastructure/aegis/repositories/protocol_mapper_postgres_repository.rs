@@ -1,9 +1,8 @@
+use crate::entity::client_scope_protocol_mappers::COLUMN;
 use std::collections::HashMap;
 
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -62,8 +61,8 @@ impl ProtocolMapperRepository for PostgresProtocolMapperRepository {
         id: Uuid,
     ) -> Result<Option<ProtocolMapper>, CoreError> {
         let model = client_scope_protocol_mappers::Entity::find()
-            .filter(client_scope_protocol_mappers::Column::Id.eq(id))
-            .filter(client_scope_protocol_mappers::Column::ClientScopeId.eq(client_scope.get().id))
+            .filter(COLUMN.id.eq(id))
+            .filter(COLUMN.client_scope_id.eq(client_scope.get().id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -77,7 +76,7 @@ impl ProtocolMapperRepository for PostgresProtocolMapperRepository {
     #[instrument(skip(self))]
     async fn get_by_scope_id(&self, scope_id: Uuid) -> Result<Vec<ProtocolMapper>, CoreError> {
         let models = client_scope_protocol_mappers::Entity::find()
-            .filter(client_scope_protocol_mappers::Column::ClientScopeId.eq(scope_id))
+            .filter(COLUMN.client_scope_id.eq(scope_id))
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -104,8 +103,8 @@ impl ProtocolMapperRepository for PostgresProtocolMapperRepository {
         payload: UpdateProtocolMapperRequest,
     ) -> Result<ProtocolMapper, CoreError> {
         let model = client_scope_protocol_mappers::Entity::find()
-            .filter(client_scope_protocol_mappers::Column::Id.eq(id))
-            .filter(client_scope_protocol_mappers::Column::ClientScopeId.eq(client_scope.get().id))
+            .filter(COLUMN.id.eq(id))
+            .filter(COLUMN.client_scope_id.eq(client_scope.get().id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -144,8 +143,8 @@ impl ProtocolMapperRepository for PostgresProtocolMapperRepository {
         id: Uuid,
     ) -> Result<(), CoreError> {
         let result = client_scope_protocol_mappers::Entity::delete_many()
-            .filter(client_scope_protocol_mappers::Column::Id.eq(id))
-            .filter(client_scope_protocol_mappers::Column::ClientScopeId.eq(client_scope.get().id))
+            .filter(COLUMN.id.eq(id))
+            .filter(COLUMN.client_scope_id.eq(client_scope.get().id))
             .exec(&self.db)
             .await
             .map_err(|e| {

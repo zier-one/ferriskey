@@ -1,17 +1,14 @@
+use crate::entity::account_elevations::COLUMN;
 use chrono::{DateTime, Utc};
 use ferriskey_domain::elevation::entities::{Elevation, ElevationId, ElevationProofKind};
 use ferriskey_domain::elevation::ports::ElevationRepository;
 use ferriskey_domain::realm::RealmId;
 use ferriskey_domain::realm::scope::Unscoped;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::domain::common::{entities::app_errors::CoreError, generate_uuid_v7};
-use crate::entity::account_elevations::{
-    ActiveModel, Column, Entity as AccountElevationEntity, Model,
-};
+use crate::entity::account_elevations::{ActiveModel, Entity as AccountElevationEntity, Model};
 
 const PROOF_PASSWORD: &str = "password";
 const PROOF_OTP: &str = "otp";
@@ -92,9 +89,9 @@ impl ElevationRepository for PostgresElevationRepository {
         now: DateTime<Utc>,
     ) -> Result<Option<Unscoped<Elevation>>, CoreError> {
         let found = AccountElevationEntity::find()
-            .filter(Column::Id.eq(Uuid::from(id)))
-            .filter(Column::UserId.eq(user_id))
-            .filter(Column::ExpiresAt.gt(now.naive_utc()))
+            .filter(COLUMN.id.eq(Uuid::from(id)))
+            .filter(COLUMN.user_id.eq(user_id))
+            .filter(COLUMN.expires_at.gt(now.naive_utc()))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -110,7 +107,7 @@ impl ElevationRepository for PostgresElevationRepository {
 
     async fn clear_for_user(&self, user_id: Uuid) -> Result<u64, CoreError> {
         let deleted = AccountElevationEntity::delete_many()
-            .filter(Column::UserId.eq(user_id))
+            .filter(COLUMN.user_id.eq(user_id))
             .exec(&self.db)
             .await
             .map_err(|e| {

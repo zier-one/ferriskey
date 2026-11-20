@@ -1,6 +1,7 @@
+use crate::entity::device_sessions::COLUMN;
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter,
     prelude::Expr, sea_query::Func,
 };
 use tracing::error;
@@ -62,7 +63,7 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         token_hash: &str,
     ) -> Result<Option<Unscoped<DeviceSession>>, DeviceSessionError> {
         let device = device_sessions::Entity::find()
-            .filter(device_sessions::Column::DeviceTokenHash.eq(token_hash))
+            .filter(COLUMN.device_token_hash.eq(token_hash))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -79,20 +80,17 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         expires_at: DateTime<Utc>,
     ) -> Result<(), DeviceSessionError> {
         let result = device_sessions::Entity::update_many()
+            .col_expr(COLUMN.last_seen_at, Expr::value(Utc::now().fixed_offset()))
             .col_expr(
-                device_sessions::Column::LastSeenAt,
-                Expr::value(Utc::now().fixed_offset()),
-            )
-            .col_expr(
-                device_sessions::Column::ExpiresAt,
+                COLUMN.expires_at,
                 sea_orm::sea_query::SimpleExpr::from(
                     Func::cust("GREATEST")
-                        .arg(Expr::col(device_sessions::Column::ExpiresAt))
+                        .arg(Expr::col(COLUMN.expires_at))
                         .arg(Expr::value(expires_at.fixed_offset())),
                 ),
             )
-            .filter(device_sessions::Column::Id.eq(device.get().id))
-            .filter(device_sessions::Column::RealmId.eq(device.get().realm_id))
+            .filter(COLUMN.id.eq(device.get().id))
+            .filter(COLUMN.realm_id.eq(device.get().realm_id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -113,8 +111,8 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         now: DateTime<Utc>,
     ) -> Result<u64, DeviceSessionError> {
         let result = device_sessions::Entity::delete_many()
-            .filter(device_sessions::Column::RealmId.eq(realm_id))
-            .filter(device_sessions::Column::ExpiresAt.lt(now.fixed_offset()))
+            .filter(COLUMN.realm_id.eq(realm_id))
+            .filter(COLUMN.expires_at.lt(now.fixed_offset()))
             .exec(&self.db)
             .await
             .map_err(|e| {

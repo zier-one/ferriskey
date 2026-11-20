@@ -1,3 +1,4 @@
+use crate::entity::realm_settings;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -5,8 +6,8 @@ use std::time::{Duration, Instant};
 use ferriskey_domain::common::pagination::{Page, PageRequest};
 use ferriskey_domain::realm::scope::RealmScope;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseConnection, DbBackend, EntityTrait, QueryFilter,
-    QueryOrder, QueryTrait, Select, Statement, Value,
+    ConnectionTrait, DatabaseConnection, DbBackend, EntityTrait, QueryFilter, QueryOrder,
+    QueryTrait, Select, Statement, Value,
 };
 use tracing::error;
 use uuid::Uuid;
@@ -210,7 +211,7 @@ impl PostgresSecurityEventRepository {
 
     async fn load_pii_config(&self, realm_id: Uuid) -> PiiConfig {
         let result = crate::entity::realm_settings::Entity::find()
-            .filter(crate::entity::realm_settings::Column::RealmId.eq(realm_id))
+            .filter(realm_settings::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await;
 
@@ -242,36 +243,38 @@ impl SortColumn<security_events::Entity> for SecurityEventSortField {
 }
 
 fn listing_select(realm_id: Uuid, filter: &SecurityEventFilter) -> Select<security_events::Entity> {
-    use security_events::Column;
-
     security_events::Entity::find()
-        .filter(Column::RealmId.eq(realm_id))
+        .filter(security_events::COLUMN.realm_id.eq(realm_id))
         .apply_if(filter.actor_id, |select, value| {
-            select.filter(Column::ActorId.eq(value))
+            select.filter(security_events::COLUMN.actor_id.eq(value))
         })
         .apply_if(filter.client_id, |select, value| {
-            select.filter(Column::TargetId.eq(value))
+            select.filter(security_events::COLUMN.target_id.eq(value))
         })
         .apply_if(filter.event_types.as_deref(), |select, values| {
-            select.filter(Column::EventType.is_in(values.iter().map(ToString::to_string)))
+            select.filter(
+                security_events::COLUMN
+                    .event_type
+                    .is_in(values.iter().map(ToString::to_string)),
+            )
         })
         .apply_if(filter.status.as_ref(), |select, value| {
-            select.filter(Column::Status.eq(value.to_string()))
+            select.filter(security_events::COLUMN.status.eq(value.to_string()))
         })
         .apply_if(filter.target_type.as_deref(), |select, value| {
-            select.filter(Column::TargetType.eq(value))
+            select.filter(security_events::COLUMN.target_type.eq(value))
         })
         .apply_if(filter.search.as_deref(), |select, value| {
-            select.filter(contains(Column::IpAddress, value))
+            select.filter(contains(security_events::COLUMN.ip_address, value))
         })
         .apply_if(filter.ip_address.as_deref(), |select, value| {
-            select.filter(contains(Column::IpAddress, value))
+            select.filter(contains(security_events::COLUMN.ip_address, value))
         })
         .apply_if(filter.from_timestamp, |select, value| {
-            select.filter(Column::Timestamp.gte(value.naive_utc()))
+            select.filter(security_events::COLUMN.timestamp.gte(value.naive_utc()))
         })
         .apply_if(filter.to_timestamp, |select, value| {
-            select.filter(Column::Timestamp.lte(value.naive_utc()))
+            select.filter(security_events::COLUMN.timestamp.lte(value.naive_utc()))
         })
 }
 
@@ -393,8 +396,8 @@ impl SecurityEventRepository for PostgresSecurityEventRepository {
         realm_id: RealmId,
     ) -> Result<Vec<SecurityEvent>, CoreError> {
         let models = security_events::Entity::find()
-            .filter(security_events::Column::RealmId.eq::<Uuid>(realm_id.into()))
-            .order_by_asc(security_events::Column::CreatedAt)
+            .filter(security_events::COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
+            .order_by_asc(security_events::COLUMN.created_at)
             .all(&self.db)
             .await
             .map_err(|e| {

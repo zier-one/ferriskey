@@ -1,8 +1,9 @@
+use crate::entity::otp_enrollments::COLUMN;
 use chrono::{DateTime, Utc};
 use ferriskey_security::crypto::secret_cipher::SecretCipher;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    QueryOrder, sea_query::Expr,
+    ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
+    sea_query::Expr,
 };
 use uuid::Uuid;
 
@@ -10,7 +11,7 @@ use crate::domain::{
     common::{entities::app_errors::CoreError, generate_uuid_v7},
     trident::ports::{OtpEnrollment, OtpEnrollmentRepository},
 };
-use crate::entity::otp_enrollments::{ActiveModel, Column, Entity as OtpEnrollmentEntity, Model};
+use crate::entity::otp_enrollments::{ActiveModel, Entity as OtpEnrollmentEntity, Model};
 
 pub const ENROLLMENT_SECRET_PURPOSE: &str = "otp_enrollments.secret";
 
@@ -89,10 +90,10 @@ impl OtpEnrollmentRepository for PostgresOtpEnrollmentRepository {
         let naive_now = now.naive_utc();
 
         let candidate = OtpEnrollmentEntity::find()
-            .filter(Column::UserId.eq(user_id))
-            .filter(Column::ConsumedAt.is_null())
-            .filter(Column::ExpiresAt.gt(naive_now))
-            .order_by_desc(Column::CreatedAt)
+            .filter(COLUMN.user_id.eq(user_id))
+            .filter(COLUMN.consumed_at.is_null())
+            .filter(COLUMN.expires_at.gt(naive_now))
+            .order_by_desc(COLUMN.created_at)
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -108,9 +109,9 @@ impl OtpEnrollmentRepository for PostgresOtpEnrollmentRepository {
         // single-use. A concurrent call that lost the race updates 0 rows and gets
         // `None`, rather than both callers enrolling the same secret.
         let claimed = OtpEnrollmentEntity::update_many()
-            .col_expr(Column::ConsumedAt, Expr::value(naive_now))
-            .filter(Column::Id.eq(candidate.id))
-            .filter(Column::ConsumedAt.is_null())
+            .col_expr(COLUMN.consumed_at, Expr::value(naive_now))
+            .filter(COLUMN.id.eq(candidate.id))
+            .filter(COLUMN.consumed_at.is_null())
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -127,7 +128,7 @@ impl OtpEnrollmentRepository for PostgresOtpEnrollmentRepository {
 
     async fn clear_enrollments(&self, user_id: Uuid) -> Result<u64, CoreError> {
         let deleted = OtpEnrollmentEntity::delete_many()
-            .filter(Column::UserId.eq(user_id))
+            .filter(COLUMN.user_id.eq(user_id))
             .exec(&self.db)
             .await
             .map_err(|e| {

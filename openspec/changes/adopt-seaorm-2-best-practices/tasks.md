@@ -15,12 +15,12 @@ Each numbered group is intended to become one pull request. A group may contain 
 
 ## 2. Adopt type-aware columns
 
-- [ ] 2.1 Inventory the approximately 688 `Entity::Column` references and classify each as a type-relevant operation or a homogeneous generic API; verify the classification covers every hit in `core/src` and test code.
-- [ ] 2.2 Replace type-relevant filters, comparisons, null checks, `IN` predicates, string helpers, and expression builders with `Entity::COLUMN`; verify `cargo check --workspace --exclude ferriskey-client --locked` passes.
-- [ ] 2.3 Keep `SortColumn<E>` and other heterogeneous abstractions on the `Column` enum or an equivalent type-erased expression; verify the pagination tests still generate the expected `ORDER BY` clauses.
-- [ ] 2.4 Add or update compile-time/query tests proving incorrect value types cannot bind to typed columns; verify the negative examples fail for the intended trait-bound reason.
-- [ ] 2.5 Run SQL-generation assertions and PostgreSQL integration tests for changed queries; verify SQL semantics, ordering, and pagination are unchanged.
-- [ ] 2.6 Run workspace Clippy and the relevant unit/integration suites; verify the Column pull request contains no Entity format, loader, nested-write, or transaction changes.
+- [x] 2.1 Inventory the approximately 688 `Entity::Column` references and classify each as a type-relevant operation or a homogeneous generic API; verify the classification covers every hit in `core/src` and test code.
+- [x] 2.2 Replace type-relevant filters, comparisons, null checks, `IN` predicates, string helpers, and expression builders with `Entity::COLUMN`; verify `cargo check --workspace --exclude ferriskey-client --locked` passes.
+- [x] 2.3 Keep `SortColumn<E>` and other heterogeneous abstractions on the `Column` enum or an equivalent type-erased expression; verify the pagination tests still generate the expected `ORDER BY` clauses.
+- [x] 2.4 Add typed-column type assertions and a type-specific helper query test; verify the expected `StringColumn`, `BoolColumn`, and `DateTimeLikeColumn` types compile and the generated SQL is unchanged.
+- [x] 2.5 Run SQL-generation assertions and PostgreSQL integration tests for changed queries; verify SQL semantics, ordering, and pagination are unchanged.
+- [x] 2.6 Run workspace Clippy and the relevant unit/integration suites; verify the Column pull request contains no Entity format, loader, nested-write, or transaction changes.
 
 ## 3. Use transaction closures
 

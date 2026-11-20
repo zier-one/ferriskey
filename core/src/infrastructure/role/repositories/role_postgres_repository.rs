@@ -5,7 +5,7 @@ use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
-    ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QueryTrait, Select,
+    Condition, DatabaseConnection, EntityTrait, QueryFilter, QueryTrait, Select,
     sea_query::{Expr, LikeExpr, Query, SimpleExpr, extension::postgres::PgExpr},
 };
 use tracing::error;
@@ -40,12 +40,12 @@ impl SortColumn<roles::Entity> for RoleSortField {
 }
 
 fn client_identifier_contains(realm_id: Uuid, value: &str) -> SimpleExpr {
-    roles::Column::ClientId.in_subquery(
+    roles::COLUMN.client_id.in_subquery(
         Query::select()
-            .column((clients::Entity, clients::Column::Id))
+            .column((clients::Entity, clients::COLUMN.id))
             .from(clients::Entity)
-            .and_where(clients::Column::RealmId.eq(realm_id))
-            .and_where(contains(clients::Column::ClientId, value))
+            .and_where(clients::COLUMN.realm_id.eq(realm_id))
+            .and_where(contains(clients::COLUMN.client_id, value))
             .to_owned(),
     )
 }
@@ -56,14 +56,14 @@ fn qualified_value_contains(realm_id: Uuid, value: &str) -> SimpleExpr {
             .expr(Expr::val(1))
             .from(clients::Entity)
             .and_where(
-                Expr::col((clients::Entity, clients::Column::Id))
-                    .equals((roles::Entity, roles::Column::ClientId)),
+                Expr::col((clients::Entity, clients::COLUMN.id))
+                    .equals((roles::Entity, roles::COLUMN.client_id)),
             )
-            .and_where(clients::Column::RealmId.eq(realm_id))
+            .and_where(clients::COLUMN.realm_id.eq(realm_id))
             .and_where(
-                Expr::col((clients::Entity, clients::Column::ClientId))
+                Expr::col((clients::Entity, clients::COLUMN.client_id))
                     .concat(".")
-                    .concat(Expr::col((roles::Entity, roles::Column::Name)))
+                    .concat(Expr::col((roles::Entity, roles::COLUMN.name)))
                     .ilike(LikeExpr::new(escape_like(value))),
             )
             .to_owned(),
@@ -74,22 +74,22 @@ fn qualified_name_equals(realm_id: Uuid, value: &str) -> Condition {
     Condition::any()
         .add(
             Condition::all()
-                .add(roles::Column::ClientId.is_null())
-                .add(roles::Column::Name.eq(value)),
+                .add(roles::COLUMN.client_id.is_null())
+                .add(roles::COLUMN.name.eq(value)),
         )
         .add(Expr::exists(
             Query::select()
                 .expr(Expr::val(1))
                 .from(clients::Entity)
                 .and_where(
-                    Expr::col((clients::Entity, clients::Column::Id))
-                        .equals((roles::Entity, roles::Column::ClientId)),
+                    Expr::col((clients::Entity, clients::COLUMN.id))
+                        .equals((roles::Entity, roles::COLUMN.client_id)),
                 )
-                .and_where(clients::Column::RealmId.eq(realm_id))
+                .and_where(clients::COLUMN.realm_id.eq(realm_id))
                 .and_where(
-                    Expr::col((clients::Entity, clients::Column::ClientId))
+                    Expr::col((clients::Entity, clients::COLUMN.client_id))
                         .concat(".")
-                        .concat(Expr::col((roles::Entity, roles::Column::Name)))
+                        .concat(Expr::col((roles::Entity, roles::COLUMN.name)))
                         .eq(value),
                 )
                 .to_owned(),
@@ -98,49 +98,49 @@ fn qualified_name_equals(realm_id: Uuid, value: &str) -> Condition {
 
 fn search_condition(realm_id: Uuid, value: &str) -> Condition {
     Condition::any()
-        .add(contains(roles::Column::Name, value))
-        .add(contains(roles::Column::Description, value))
+        .add(contains(roles::COLUMN.name, value))
+        .add(contains(roles::COLUMN.description, value))
         .add(client_identifier_contains(realm_id, value))
         .add(qualified_value_contains(realm_id, value))
 }
 
 fn listing_select(realm_id: Uuid, filter: &RoleFilter) -> Select<roles::Entity> {
     roles::Entity::find()
-        .filter(roles::Column::RealmId.eq(realm_id))
-        .filter(within_naive(roles::Column::CreatedAt, &filter.created))
+        .filter(roles::COLUMN.realm_id.eq(realm_id))
+        .filter(within_naive(roles::COLUMN.created_at, &filter.created))
         .apply_if(filter.search.as_deref(), |select, value| {
             select.filter(search_condition(realm_id, value))
         })
         .apply_if(filter.name.as_deref(), |select, value| {
-            select.filter(contains(roles::Column::Name, value))
+            select.filter(contains(roles::COLUMN.name, value))
         })
         .apply_if(filter.qualified_name.as_deref(), |select, value| {
             select.filter(qualified_name_equals(realm_id, value))
         })
         .apply_if(filter.description.as_deref(), |select, value| {
-            select.filter(contains(roles::Column::Description, value))
+            select.filter(contains(roles::COLUMN.description, value))
         })
         .apply_if(filter.require_mfa, |select, value| {
-            select.filter(roles::Column::RequireMfa.eq(value))
+            select.filter(roles::COLUMN.require_mfa.eq(value))
         })
         .apply_if(filter.client_id, |select, client_id| {
-            select.filter(roles::Column::ClientId.eq(client_id))
+            select.filter(roles::COLUMN.client_id.eq(client_id))
         })
         .apply_if(filter.scope, |select, scope| {
             select.filter(match scope {
-                RoleScope::Realm => roles::Column::ClientId.is_null(),
-                RoleScope::Client => roles::Column::ClientId.is_not_null(),
+                RoleScope::Realm => roles::COLUMN.client_id.is_null(),
+                RoleScope::Client => roles::COLUMN.client_id.is_not_null(),
             })
         })
         .apply_if(filter.has_permissions, |select, granting| {
             select.filter(if granting {
-                roles::Column::Permissions.ne(0)
+                roles::COLUMN.permissions.ne(0)
             } else {
-                roles::Column::Permissions.eq(0)
+                roles::COLUMN.permissions.eq(0)
             })
         })
         .apply_if(filter.ids.as_deref(), |select, ids| {
-            select.filter(roles::Column::Id.is_in(ids.iter().copied()))
+            select.filter(roles::COLUMN.id.is_in(ids.iter().copied()))
         })
 }
 
@@ -183,7 +183,7 @@ impl RoleRepository for PostgresRoleRepository {
 
     async fn get_by_client_id(&self, client_id: uuid::Uuid) -> Result<Vec<Role>, CoreError> {
         let roles = crate::entity::roles::Entity::find()
-            .filter(crate::entity::roles::Column::ClientId.eq(client_id))
+            .filter(roles::COLUMN.client_id.eq(client_id))
             .all(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?
@@ -196,7 +196,7 @@ impl RoleRepository for PostgresRoleRepository {
 
     async fn get_by_id(&self, id: Uuid) -> Result<Option<Unscoped<Role>>, CoreError> {
         let roles_with_clients = crate::entity::roles::Entity::find()
-            .filter(crate::entity::roles::Column::Id.eq(id))
+            .filter(roles::COLUMN.id.eq(id))
             .find_with_related(crate::entity::clients::Entity)
             .all(&self.db)
             .await
@@ -219,7 +219,7 @@ impl RoleRepository for PostgresRoleRepository {
 
     async fn delete_by_id(&self, role: &Scoped<Role>) -> Result<(), CoreError> {
         let result = crate::entity::roles::Entity::delete_many()
-            .filter(crate::entity::roles::Column::Id.eq(role.get().id))
+            .filter(roles::COLUMN.id.eq(role.get().id))
             .exec(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;
@@ -247,7 +247,7 @@ impl RoleRepository for PostgresRoleRepository {
             HashMap::new()
         } else {
             clients::Entity::find()
-                .filter(clients::Column::Id.is_in(client_ids))
+                .filter(clients::COLUMN.id.is_in(client_ids))
                 .all(&self.db)
                 .await
                 .map_err(|e| {
@@ -281,8 +281,8 @@ impl RoleRepository for PostgresRoleRepository {
         realm_id: Uuid,
     ) -> Result<Option<Unscoped<Role>>, CoreError> {
         let role = crate::entity::roles::Entity::find()
-            .filter(crate::entity::roles::Column::Name.eq(name))
-            .filter(crate::entity::roles::Column::RealmId.eq(realm_id))
+            .filter(roles::COLUMN.name.eq(name))
+            .filter(roles::COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?
@@ -298,7 +298,7 @@ impl RoleRepository for PostgresRoleRepository {
         payload: UpdateRoleRequest,
     ) -> Result<Role, CoreError> {
         let role = crate::entity::roles::Entity::find()
-            .filter(crate::entity::roles::Column::Id.eq(role.get().id))
+            .filter(roles::COLUMN.id.eq(role.get().id))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?
@@ -330,7 +330,7 @@ impl RoleRepository for PostgresRoleRepository {
         payload: UpdateRolePermissionsRequest,
     ) -> Result<Role, CoreError> {
         let role = crate::entity::roles::Entity::find()
-            .filter(crate::entity::roles::Column::Id.eq(role.get().id))
+            .filter(roles::COLUMN.id.eq(role.get().id))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?

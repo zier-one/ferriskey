@@ -1,7 +1,6 @@
+use crate::entity::password_policy::COLUMN;
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use tracing::{error, instrument};
 use uuid::Uuid;
 
@@ -46,7 +45,7 @@ impl PasswordPolicyRepository for PostgresPasswordPolicyRepository {
     #[instrument(skip(self), err)]
     async fn find_by_realm_id(&self, realm_id: Uuid) -> Result<Option<PasswordPolicy>, CoreError> {
         let result = crate::entity::password_policy::Entity::find()
-            .filter(crate::entity::password_policy::Column::RealmId.eq(realm_id))
+            .filter(COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -67,7 +66,7 @@ impl PasswordPolicyRepository for PostgresPasswordPolicyRepository {
 
         // Try to find existing policy
         let existing = crate::entity::password_policy::Entity::find()
-            .filter(crate::entity::password_policy::Column::RealmId.eq(realm_id))
+            .filter(COLUMN.realm_id.eq(realm_id))
             .one(&self.db)
             .await
             .map_err(|e| {

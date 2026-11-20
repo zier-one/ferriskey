@@ -1,7 +1,8 @@
+use sea_orm::ExprTrait;
 use sea_orm::{
-    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, Iterable, Order, PaginatorTrait,
-    PrimaryKeyToColumn, QueryOrder, QuerySelect, Select,
-    sea_query::{Expr, LikeExpr, SimpleExpr, extension::postgres::PgExpr},
+    Condition, ConnectionTrait, DbErr, EntityTrait, IntoSimpleExpr, Iterable, Order,
+    PaginatorTrait, PrimaryKeyToColumn, QueryOrder, QuerySelect, Select,
+    sea_query::{LikeExpr, SimpleExpr, extension::postgres::PgExpr},
 };
 
 use crate::domain::common::pagination::{DateRange, PageRequest, SortOrder};
@@ -76,20 +77,24 @@ pub fn escape_like(value: &str) -> String {
     pattern
 }
 
-pub fn contains<C: ColumnTrait>(column: C, value: &str) -> SimpleExpr {
-    Expr::col((column.entity_name(), column)).ilike(LikeExpr::new(escape_like(value)))
+pub fn contains<C: IntoSimpleExpr>(column: C, value: &str) -> SimpleExpr {
+    column
+        .into_simple_expr()
+        .ilike(LikeExpr::new(escape_like(value)))
 }
 
-pub fn within<C: ColumnTrait>(column: C, range: &DateRange) -> Condition {
+pub fn within<C: IntoSimpleExpr>(column: C, range: &DateRange) -> Condition {
+    let column = column.into_simple_expr();
     Condition::all()
-        .add_option(range.from.map(|from| column.gte(from)))
-        .add_option(range.to.map(|to| column.lt(to)))
+        .add_option(range.from.map(|from| column.clone().gte(from)))
+        .add_option(range.to.map(|to| column.clone().lt(to)))
 }
 
-pub fn within_naive<C: ColumnTrait>(column: C, range: &DateRange) -> Condition {
+pub fn within_naive<C: IntoSimpleExpr>(column: C, range: &DateRange) -> Condition {
+    let column = column.into_simple_expr();
     Condition::all()
-        .add_option(range.from.map(|from| column.gte(from.naive_utc())))
-        .add_option(range.to.map(|to| column.lt(to.naive_utc())))
+        .add_option(range.from.map(|from| column.clone().gte(from.naive_utc())))
+        .add_option(range.to.map(|to| column.clone().lt(to.naive_utc())))
 }
 
 pub fn order<E, F, S>(select: Select<E>, request: &PageRequest<F, S>) -> Select<E>
@@ -122,7 +127,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::{DbBackend, EntityTrait, QueryFilter, QueryTrait};
+    use sea_orm::{DbBackend, EntityTrait, QueryFilter, QueryTrait, sea_query::Expr};
 
     use super::*;
     use chrono::{TimeZone, Utc};
@@ -197,8 +202,8 @@ mod tests {
     impl SortExpr for TestSort {
         fn expr(&self) -> SimpleExpr {
             match self {
-                TestSort::Name => Expr::col((users::Entity, users::Column::Username)),
-                TestSort::CreatedAt => Expr::col((realms::Entity, realms::Column::CreatedAt)),
+                TestSort::Name => Expr::col((users::Entity, users::COLUMN.username)),
+                TestSort::CreatedAt => Expr::col((realms::Entity, realms::COLUMN.created_at)),
             }
         }
     }
@@ -217,7 +222,7 @@ mod tests {
         let sql = page_by_expr(
             realms::Entity::find().select_also(users::Entity),
             &request,
-            Expr::col((realms::Entity, realms::Column::Id)),
+            Expr::col((realms::Entity, realms::COLUMN.id)),
         )
         .build(DbBackend::Postgres)
         .to_string();
@@ -236,7 +241,7 @@ mod tests {
         let sql = page_by_expr(
             realms::Entity::find(),
             &self::request(TestSort::CreatedAt, SortOrder::Desc),
-            Expr::col((realms::Entity, realms::Column::Id)),
+            Expr::col((realms::Entity, realms::COLUMN.id)),
         )
         .build(DbBackend::Postgres)
         .to_string();
@@ -252,7 +257,7 @@ mod tests {
     #[test]
     fn contains_is_a_qualified_case_insensitive_escaped_match() {
         let sql = realms::Entity::find()
-            .filter(contains(realms::Column::Name, "a_b"))
+            .filter(contains(realms::COLUMN.name, "a_b"))
             .build(DbBackend::Postgres)
             .to_string();
         assert!(
@@ -268,7 +273,7 @@ mod tests {
         let to = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).single();
         let sql = realms::Entity::find()
             .filter(within_naive(
-                realms::Column::CreatedAt,
+                realms::COLUMN.created_at,
                 &DateRange::new(from, to),
             ))
             .build(DbBackend::Postgres)
@@ -295,7 +300,7 @@ mod tests {
         let to = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).single();
         let sql = organizations::Entity::find()
             .filter(within(
-                organizations::Column::CreatedAt,
+                organizations::COLUMN.created_at,
                 &DateRange::new(from, to),
             ))
             .build(DbBackend::Postgres)
@@ -320,7 +325,7 @@ mod tests {
     fn unbounded_range_adds_no_condition() {
         let sql = realms::Entity::find()
             .filter(within_naive(
-                realms::Column::CreatedAt,
+                realms::COLUMN.created_at,
                 &DateRange::default(),
             ))
             .build(DbBackend::Postgres)
@@ -328,5 +333,23 @@ mod tests {
         assert!(str::ends_with(&sql, "WHERE TRUE"), "{sql}");
         assert!(!str::contains(&sql, r#""realms"."created_at" >"#), "{sql}");
         assert!(!str::contains(&sql, r#""realms"."created_at" <"#), "{sql}");
+    }
+
+    #[test]
+    fn typed_columns_keep_their_sql_types_and_type_specific_helpers() {
+        use sea_orm::{BoolColumn, DateTimeLikeColumn, StringColumn};
+
+        let _: StringColumn<users::Entity> = users::COLUMN.username;
+        let _: BoolColumn<users::Entity> = users::COLUMN.enabled;
+        let _: DateTimeLikeColumn<users::Entity> = users::COLUMN.created_at;
+
+        let sql = users::Entity::find()
+            .filter(users::COLUMN.username.contains("Bob"))
+            .build(DbBackend::Postgres)
+            .to_string();
+        assert!(
+            str::contains(&sql, r#""users"."username" LIKE '%Bob%'"#),
+            "{sql}"
+        );
     }
 }

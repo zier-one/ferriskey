@@ -1,7 +1,6 @@
+use crate::entity::broker_auth_sessions::COLUMN;
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -11,7 +10,7 @@ use crate::domain::abyss::identity_provider::broker::{
 use crate::domain::common::entities::app_errors::CoreError;
 use crate::domain::common::generate_uuid_v7;
 use crate::domain::realm::entities::{Scoped, Unscoped};
-use crate::entity::broker_auth_sessions::{ActiveModel, Column, Entity as BrokerAuthSessionEntity};
+use crate::entity::broker_auth_sessions::{ActiveModel, Entity as BrokerAuthSessionEntity};
 
 /// PostgreSQL implementation of the BrokerAuthSessionRepository trait
 #[derive(Debug, Clone)]
@@ -67,7 +66,7 @@ impl BrokerAuthSessionRepository for PostgresBrokerAuthSessionRepository {
         broker_state: &str,
     ) -> Result<Option<Unscoped<BrokerAuthSession>>, CoreError> {
         let session = BrokerAuthSessionEntity::find()
-            .filter(Column::BrokerState.eq(broker_state))
+            .filter(COLUMN.broker_state.eq(broker_state))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -83,7 +82,7 @@ impl BrokerAuthSessionRepository for PostgresBrokerAuthSessionRepository {
     #[instrument(skip(self), fields(session_id = %id))]
     async fn get_by_id(&self, id: Uuid) -> Result<Option<Unscoped<BrokerAuthSession>>, CoreError> {
         let session = BrokerAuthSessionEntity::find()
-            .filter(Column::Id.eq(id))
+            .filter(COLUMN.id.eq(id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -99,7 +98,7 @@ impl BrokerAuthSessionRepository for PostgresBrokerAuthSessionRepository {
     #[instrument(skip(self), fields(session_id = %session.get().id))]
     async fn delete(&self, session: &Scoped<BrokerAuthSession>) -> Result<(), CoreError> {
         BrokerAuthSessionEntity::delete_many()
-            .filter(Column::Id.eq(session.get().id))
+            .filter(COLUMN.id.eq(session.get().id))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -115,7 +114,7 @@ impl BrokerAuthSessionRepository for PostgresBrokerAuthSessionRepository {
         let now = Utc::now().fixed_offset();
 
         let result = BrokerAuthSessionEntity::delete_many()
-            .filter(Column::ExpiresAt.lt(now))
+            .filter(COLUMN.expires_at.lt(now))
             .exec(&self.db)
             .await
             .map_err(|e| {

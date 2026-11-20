@@ -1,8 +1,10 @@
+use crate::entity::refresh_tokens;
+use crate::entity::users;
 use chrono::{DateTime, TimeZone, Utc};
 use sea_orm::sea_query::{Expr, Query};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait,
-    DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, QueryFilter, Statement,
+    ActiveModelTrait, ActiveValue::Set, Condition, ConnectionTrait, DatabaseConnection, DbBackend,
+    EntityTrait, FromQueryResult, QueryFilter, Statement,
 };
 use uuid::Uuid;
 
@@ -207,8 +209,8 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
         let model = crate::entity::refresh_tokens::Entity::find()
             .filter(
                 Condition::any()
-                    .add(crate::entity::refresh_tokens::Column::Jti.eq(jti))
-                    .add(crate::entity::refresh_tokens::Column::PreviousJti.eq(jti)),
+                    .add(refresh_tokens::COLUMN.jti.eq(jti))
+                    .add(refresh_tokens::COLUMN.previous_jti.eq(jti)),
             )
             .one(&self.db)
             .await
@@ -221,15 +223,9 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
 
     async fn revoke_by_jti(&self, jti: Uuid) -> Result<(), JwtError> {
         crate::entity::refresh_tokens::Entity::update_many()
-            .col_expr(
-                crate::entity::refresh_tokens::Column::Revoked,
-                Expr::value(true),
-            )
-            .col_expr(
-                crate::entity::refresh_tokens::Column::Status,
-                Expr::value("revoked"),
-            )
-            .filter(crate::entity::refresh_tokens::Column::Jti.eq(jti))
+            .col_expr(refresh_tokens::COLUMN.revoked, Expr::value(true))
+            .col_expr(refresh_tokens::COLUMN.status, Expr::value("revoked"))
+            .filter(refresh_tokens::COLUMN.jti.eq(jti))
             .exec(&self.db)
             .await
             .map_err(|e| JwtError::GenerationError(e.to_string()))?;
@@ -239,7 +235,7 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
 
     async fn delete(&self, jti: Uuid) -> Result<(), JwtError> {
         crate::entity::refresh_tokens::Entity::delete_many()
-            .filter(crate::entity::refresh_tokens::Column::Jti.eq(jti))
+            .filter(refresh_tokens::COLUMN.jti.eq(jti))
             .exec(&self.db)
             .await
             .map_err(|e| JwtError::GenerationError(e.to_string()))?;
@@ -338,9 +334,10 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
         let model = crate::entity::refresh_tokens::Entity::find()
             .filter(
                 Condition::any()
-                    .add(crate::entity::refresh_tokens::Column::TokenHash.eq(hash.0.to_vec()))
+                    .add(refresh_tokens::COLUMN.token_hash.eq(hash.0.to_vec()))
                     .add(
-                        crate::entity::refresh_tokens::Column::PreviousTokenHash
+                        refresh_tokens::COLUMN
+                            .previous_token_hash
                             .eq(hash.0.to_vec()),
                     ),
             )
@@ -361,22 +358,16 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
         realm_id: Uuid,
     ) -> Result<bool, JwtError> {
         let realm_users = Query::select()
-            .column(crate::entity::users::Column::Id)
+            .column(users::COLUMN.id)
             .from(crate::entity::users::Entity)
-            .and_where(crate::entity::users::Column::RealmId.eq(realm_id))
+            .and_where(users::COLUMN.realm_id.eq(realm_id))
             .to_owned();
         let result = crate::entity::refresh_tokens::Entity::update_many()
-            .col_expr(
-                crate::entity::refresh_tokens::Column::Revoked,
-                Expr::value(true),
-            )
-            .col_expr(
-                crate::entity::refresh_tokens::Column::Status,
-                Expr::value("revoked"),
-            )
-            .filter(crate::entity::refresh_tokens::Column::TokenHash.eq(hash.0.to_vec()))
-            .filter(crate::entity::refresh_tokens::Column::ClientId.eq(client_id))
-            .filter(crate::entity::refresh_tokens::Column::UserId.in_subquery(realm_users))
+            .col_expr(refresh_tokens::COLUMN.revoked, Expr::value(true))
+            .col_expr(refresh_tokens::COLUMN.status, Expr::value("revoked"))
+            .filter(refresh_tokens::COLUMN.token_hash.eq(hash.0.to_vec()))
+            .filter(refresh_tokens::COLUMN.client_id.eq(client_id))
+            .filter(refresh_tokens::COLUMN.user_id.in_subquery(realm_users))
             .exec(&self.db)
             .await
             .map_err(|e| JwtError::GenerationError(e.to_string()))?;
@@ -386,15 +377,9 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
 
     async fn revoke_family(&self, family_id: Uuid) -> Result<(), JwtError> {
         crate::entity::refresh_tokens::Entity::update_many()
-            .col_expr(
-                crate::entity::refresh_tokens::Column::Status,
-                Expr::value("revoked"),
-            )
-            .col_expr(
-                crate::entity::refresh_tokens::Column::Revoked,
-                Expr::value(true),
-            )
-            .filter(crate::entity::refresh_tokens::Column::FamilyId.eq(family_id))
+            .col_expr(refresh_tokens::COLUMN.status, Expr::value("revoked"))
+            .col_expr(refresh_tokens::COLUMN.revoked, Expr::value(true))
+            .filter(refresh_tokens::COLUMN.family_id.eq(family_id))
             .exec(&self.db)
             .await
             .map_err(|e| JwtError::GenerationError(e.to_string()))?;
@@ -404,15 +389,9 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
 
     async fn revoke_by_session_id(&self, session_id: Uuid) -> Result<u64, JwtError> {
         let result = crate::entity::refresh_tokens::Entity::update_many()
-            .col_expr(
-                crate::entity::refresh_tokens::Column::Status,
-                Expr::value("revoked"),
-            )
-            .col_expr(
-                crate::entity::refresh_tokens::Column::Revoked,
-                Expr::value(true),
-            )
-            .filter(crate::entity::refresh_tokens::Column::SessionId.eq(session_id))
+            .col_expr(refresh_tokens::COLUMN.status, Expr::value("revoked"))
+            .col_expr(refresh_tokens::COLUMN.revoked, Expr::value(true))
+            .filter(refresh_tokens::COLUMN.session_id.eq(session_id))
             .exec(&self.db)
             .await
             .map_err(|e| JwtError::GenerationError(e.to_string()))?;
@@ -422,13 +401,13 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
 
     async fn delete_expired(&self, before: DateTime<Utc>, limit: u64) -> Result<u64, JwtError> {
         let oldest = Query::select()
-            .column(crate::entity::refresh_tokens::Column::Id)
+            .column(refresh_tokens::COLUMN.id)
             .from(crate::entity::refresh_tokens::Entity)
-            .and_where(crate::entity::refresh_tokens::Column::ExpiresAt.lt(before.naive_utc()))
+            .and_where(refresh_tokens::COLUMN.expires_at.lt(before.naive_utc()))
             .limit(limit)
             .to_owned();
         let result = crate::entity::refresh_tokens::Entity::delete_many()
-            .filter(crate::entity::refresh_tokens::Column::Id.in_subquery(oldest))
+            .filter(refresh_tokens::COLUMN.id.in_subquery(oldest))
             .exec(&self.db)
             .await
             .map_err(|e| JwtError::GenerationError(e.to_string()))?;
@@ -438,15 +417,9 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
 
     async fn revoke_all_for_user(&self, user_id: Uuid) -> Result<u64, JwtError> {
         let result = crate::entity::refresh_tokens::Entity::update_many()
-            .col_expr(
-                crate::entity::refresh_tokens::Column::Status,
-                Expr::value("revoked"),
-            )
-            .col_expr(
-                crate::entity::refresh_tokens::Column::Revoked,
-                Expr::value(true),
-            )
-            .filter(crate::entity::refresh_tokens::Column::UserId.eq(user_id))
+            .col_expr(refresh_tokens::COLUMN.status, Expr::value("revoked"))
+            .col_expr(refresh_tokens::COLUMN.revoked, Expr::value(true))
+            .filter(refresh_tokens::COLUMN.user_id.eq(user_id))
             .exec(&self.db)
             .await
             .map_err(|e| JwtError::GenerationError(e.to_string()))?;

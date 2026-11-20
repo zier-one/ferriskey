@@ -11,9 +11,9 @@ use ferriskey_security::crypto::secret_cipher::SecretCipher;
 use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
-    ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DbBackend, EntityTrait,
-    IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, QueryTrait, Select,
-    Statement, TransactionTrait,
+    Condition, ConnectionTrait, DatabaseConnection, DbBackend, EntityTrait, IntoActiveModel,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, QueryTrait, Select, Statement,
+    TransactionTrait,
     sea_query::{Expr, Func},
 };
 use tracing::{error, instrument, warn};
@@ -55,7 +55,7 @@ fn device_grant() -> Expr {
     Expr::expr(Func::coalesce([
         Expr::col((
             clients::Entity,
-            clients::Column::OauthDeviceCodeGrantEnabled,
+            clients::COLUMN.oauth_device_code_grant_enabled,
         )),
         Expr::val(false),
     ]))
@@ -71,62 +71,62 @@ fn with_redirect_uris() -> sea_orm::sea_query::SelectStatement {
 fn device_only() -> Condition {
     Condition::all()
         .add(device_grant().eq(true))
-        .add(clients::Column::Id.not_in_subquery(with_redirect_uris()))
+        .add(clients::COLUMN.id.not_in_subquery(with_redirect_uris()))
 }
 
 fn application(kind: ApplicationType) -> Condition {
     let interactive = Condition::all()
-        .add(clients::Column::ServiceAccountEnabled.eq(false))
+        .add(clients::COLUMN.service_account_enabled.eq(false))
         .add(device_only().not());
     let public_type = |public_client: bool| {
         interactive
             .clone()
-            .add(clients::Column::ClientType.eq("public"))
-            .add(clients::Column::PublicClient.eq(public_client))
+            .add(clients::COLUMN.client_type.eq("public"))
+            .add(clients::COLUMN.public_client.eq(public_client))
     };
     match kind {
         ApplicationType::M2m => {
-            Condition::all().add(clients::Column::ServiceAccountEnabled.eq(true))
+            Condition::all().add(clients::COLUMN.service_account_enabled.eq(true))
         }
         ApplicationType::Device => Condition::all()
-            .add(clients::Column::ServiceAccountEnabled.eq(false))
+            .add(clients::COLUMN.service_account_enabled.eq(false))
             .add(device_only()),
         ApplicationType::Spa => public_type(true),
         ApplicationType::Native => public_type(false),
-        ApplicationType::Web => interactive.add(clients::Column::ClientType.ne("public")),
+        ApplicationType::Web => interactive.add(clients::COLUMN.client_type.ne("public")),
     }
 }
 
 fn search(value: &str) -> Condition {
     Condition::any()
-        .add(contains(clients::Column::Name, value))
-        .add(contains(clients::Column::ClientId, value))
+        .add(contains(clients::COLUMN.name, value))
+        .add(contains(clients::COLUMN.client_id, value))
 }
 
 fn listing_select(realm_id: Uuid, filter: &ClientFilter) -> Select<clients::Entity> {
     clients::Entity::find()
-        .filter(clients::Column::RealmId.eq(realm_id))
-        .filter(within_naive(clients::Column::CreatedAt, &filter.created))
+        .filter(clients::COLUMN.realm_id.eq(realm_id))
+        .filter(within_naive(clients::COLUMN.created_at, &filter.created))
         .apply_if(filter.search.as_deref(), |select, value| {
             select.filter(search(value))
         })
         .apply_if(filter.name.as_deref(), |select, value| {
-            select.filter(contains(clients::Column::Name, value))
+            select.filter(contains(clients::COLUMN.name, value))
         })
         .apply_if(filter.client_id.as_deref(), |select, value| {
-            select.filter(contains(clients::Column::ClientId, value))
+            select.filter(contains(clients::COLUMN.client_id, value))
         })
         .apply_if(filter.client_id_exact.as_deref(), |select, value| {
-            select.filter(clients::Column::ClientId.eq(value))
+            select.filter(clients::COLUMN.client_id.eq(value))
         })
         .apply_if(filter.enabled, |select, value| {
-            select.filter(clients::Column::Enabled.eq(value))
+            select.filter(clients::COLUMN.enabled.eq(value))
         })
         .apply_if(filter.public_client, |select, value| {
-            select.filter(clients::Column::PublicClient.eq(value))
+            select.filter(clients::COLUMN.public_client.eq(value))
         })
         .apply_if(filter.service_account_enabled, |select, value| {
-            select.filter(clients::Column::ServiceAccountEnabled.eq(value))
+            select.filter(clients::COLUMN.service_account_enabled.eq(value))
         })
         .apply_if(filter.oauth_device_code_grant_enabled, |select, value| {
             select.filter(device_grant().eq(value))
@@ -135,29 +135,29 @@ fn listing_select(realm_id: Uuid, filter: &ClientFilter) -> Select<clients::Enti
             select.filter(application(kind))
         })
         .apply_if(filter.protocol, |select, protocol| {
-            select.filter(clients::Column::Protocol.eq(protocol.as_str()))
+            select.filter(clients::COLUMN.protocol.eq(protocol.as_str()))
         })
         .apply_if(filter.client_type.as_ref(), |select, client_type| {
-            select.filter(clients::Column::ClientType.eq(client_type.to_string()))
+            select.filter(clients::COLUMN.client_type.eq(client_type.to_string()))
         })
         .apply_if(filter.has_redirect_uris, |select, present| {
             select.filter(if present {
-                clients::Column::Id.in_subquery(with_redirect_uris())
+                clients::COLUMN.id.in_subquery(with_redirect_uris())
             } else {
-                clients::Column::Id.not_in_subquery(with_redirect_uris())
+                clients::COLUMN.id.not_in_subquery(with_redirect_uris())
             })
         })
         .apply_if(filter.maintenance_enabled, |select, value| {
             select.filter(if value {
-                Condition::all().add(clients::Column::MaintenanceEnabled.eq(true))
+                Condition::all().add(clients::COLUMN.maintenance_enabled.eq(true))
             } else {
                 Condition::any()
-                    .add(clients::Column::MaintenanceEnabled.eq(false))
-                    .add(clients::Column::MaintenanceEnabled.is_null())
+                    .add(clients::COLUMN.maintenance_enabled.eq(false))
+                    .add(clients::COLUMN.maintenance_enabled.is_null())
             })
         })
         .apply_if(filter.ids.as_deref(), |select, ids| {
-            select.filter(clients::Column::Id.is_in(ids.iter().copied()))
+            select.filter(clients::COLUMN.id.is_in(ids.iter().copied()))
         })
 }
 
@@ -298,8 +298,8 @@ impl ClientRepository for PostgresClientRepository {
         realm_id: RealmId,
     ) -> Result<Unscoped<Client>, CoreError> {
         let client = ClientEntity::find()
-            .filter(crate::entity::clients::Column::ClientId.eq(client_id))
-            .filter(crate::entity::clients::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(clients::COLUMN.client_id.eq(client_id))
+            .filter(clients::COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?
@@ -314,8 +314,8 @@ impl ClientRepository for PostgresClientRepository {
         id: uuid::Uuid,
     ) -> Result<Unscoped<Client>, CoreError> {
         let clients_model = ClientEntity::find()
-            .filter(crate::entity::clients::Column::Id.eq(id))
-            .filter(crate::entity::clients::Column::RealmId.eq(Uuid::from(realm_id)))
+            .filter(clients::COLUMN.id.eq(id))
+            .filter(clients::COLUMN.realm_id.eq(Uuid::from(realm_id)))
             .find_with_related(crate::entity::redirect_uris::Entity)
             .all(&self.db)
             .await
@@ -341,7 +341,7 @@ impl ClientRepository for PostgresClientRepository {
 
     async fn get_by_realm_id(&self, realm_id: RealmId) -> Result<Vec<Client>, CoreError> {
         let clients = ClientEntity::find()
-            .filter(crate::entity::clients::Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(clients::COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .all(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;
@@ -366,9 +366,9 @@ impl ClientRepository for PostgresClientRepository {
         let mut uris: HashMap<Uuid, Vec<RedirectUri>> = HashMap::new();
         if !ids.is_empty() {
             let rows = redirect_uris::Entity::find()
-                .filter(redirect_uris::Column::ClientId.is_in(ids))
-                .order_by_asc(redirect_uris::Column::CreatedAt)
-                .order_by_asc(redirect_uris::Column::Id)
+                .filter(redirect_uris::COLUMN.client_id.is_in(ids))
+                .order_by_asc(redirect_uris::COLUMN.created_at)
+                .order_by_asc(redirect_uris::COLUMN.id)
                 .all(&self.db)
                 .await
                 .map_err(|e| {
@@ -399,8 +399,12 @@ impl ClientRepository for PostgresClientRepository {
         data: UpdateClientRequest,
     ) -> Result<Client, CoreError> {
         let client = ClientEntity::find()
-            .filter(crate::entity::clients::Column::Id.eq(client.get().id))
-            .filter(crate::entity::clients::Column::RealmId.eq(Uuid::from(client.get().realm_id)))
+            .filter(clients::COLUMN.id.eq(client.get().id))
+            .filter(
+                clients::COLUMN
+                    .realm_id
+                    .eq(Uuid::from(client.get().realm_id)),
+            )
             .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?
@@ -504,8 +508,12 @@ impl ClientRepository for PostgresClientRepository {
 
     async fn delete_by_id(&self, client: &Scoped<Client>) -> Result<(), CoreError> {
         let result = ClientEntity::delete_many()
-            .filter(crate::entity::clients::Column::Id.eq(client.get().id))
-            .filter(crate::entity::clients::Column::RealmId.eq(Uuid::from(client.get().realm_id)))
+            .filter(clients::COLUMN.id.eq(client.get().id))
+            .filter(
+                clients::COLUMN
+                    .realm_id
+                    .eq(Uuid::from(client.get().realm_id)),
+            )
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -533,8 +541,12 @@ impl ClientRepository for PostgresClientRepository {
         })?;
 
         let row = ClientEntity::find()
-            .filter(clients::Column::Id.eq(id))
-            .filter(clients::Column::RealmId.eq(Uuid::from(client.get().realm_id)))
+            .filter(clients::COLUMN.id.eq(id))
+            .filter(
+                clients::COLUMN
+                    .realm_id
+                    .eq(Uuid::from(client.get().realm_id)),
+            )
             .lock_exclusive()
             .one(&transaction)
             .await
@@ -591,16 +603,20 @@ impl ClientRepository for PostgresClientRepository {
     async fn revoke_previous_secret(&self, client: &Scoped<Client>) -> Result<bool, CoreError> {
         let result = ClientEntity::update_many()
             .col_expr(
-                clients::Column::PreviousSecret,
+                clients::COLUMN.previous_secret,
                 Expr::value(Option::<String>::None),
             )
             .col_expr(
-                clients::Column::PreviousSecretExpiresAt,
+                clients::COLUMN.previous_secret_expires_at,
                 Expr::value(Option::<chrono::NaiveDateTime>::None),
             )
-            .filter(clients::Column::Id.eq(client.get().id))
-            .filter(clients::Column::RealmId.eq(Uuid::from(client.get().realm_id)))
-            .filter(clients::Column::PreviousSecret.is_not_null())
+            .filter(clients::COLUMN.id.eq(client.get().id))
+            .filter(
+                clients::COLUMN
+                    .realm_id
+                    .eq(Uuid::from(client.get().realm_id)),
+            )
+            .filter(clients::COLUMN.previous_secret.is_not_null())
             .filter(Expr::cust(
                 "previous_secret_expires_at > (clock_timestamp() AT TIME ZONE 'UTC')",
             ))
@@ -658,8 +674,8 @@ impl ClientRepository for PostgresClientRepository {
         source: ClientRegistrationSource,
     ) -> Result<u64, CoreError> {
         ClientEntity::find()
-            .filter(clients::Column::RealmId.eq(Uuid::from(realm_id)))
-            .filter(clients::Column::RegistrationSource.eq(source.to_string()))
+            .filter(clients::COLUMN.realm_id.eq(Uuid::from(realm_id)))
+            .filter(clients::COLUMN.registration_source.eq(source.to_string()))
             .count(&self.db)
             .await
             .map_err(|e| {

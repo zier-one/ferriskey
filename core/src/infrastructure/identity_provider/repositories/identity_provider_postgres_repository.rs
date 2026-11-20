@@ -1,10 +1,11 @@
+use crate::entity::identity_providers::COLUMN;
 use ferriskey_security::crypto::secret_cipher::SecretCipher;
 use sea_orm::ExprTrait;
 use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
-    ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QueryTrait, Select,
+    Condition, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QueryTrait, Select,
     sea_query::{Expr, SimpleExpr},
 };
 use tracing::instrument;
@@ -73,8 +74,8 @@ fn health(value: IdentityProviderHealth) -> Condition {
 
 fn search(value: &str) -> Condition {
     Condition::any()
-        .add(contains(Column::Alias, value))
-        .add(contains(Column::DisplayName, value))
+        .add(contains(COLUMN.alias, value))
+        .add(contains(COLUMN.display_name, value))
 }
 
 fn listing_select(
@@ -82,22 +83,22 @@ fn listing_select(
     filter: &IdentityProviderFilter,
 ) -> Select<IdentityProviderEntity> {
     IdentityProviderEntity::find()
-        .filter(Column::RealmId.eq(realm_id))
-        .filter(within(Column::CreatedAt, &filter.created))
+        .filter(COLUMN.realm_id.eq(realm_id))
+        .filter(within(COLUMN.created_at, &filter.created))
         .apply_if(filter.search.as_deref(), |select, value| {
             select.filter(search(value))
         })
         .apply_if(filter.alias.as_deref(), |select, value| {
-            select.filter(contains(Column::Alias, value))
+            select.filter(contains(COLUMN.alias, value))
         })
         .apply_if(filter.display_name.as_deref(), |select, value| {
-            select.filter(contains(Column::DisplayName, value))
+            select.filter(contains(COLUMN.display_name, value))
         })
         .apply_if(filter.provider_id.as_deref(), |select, value| {
-            select.filter(Column::ProviderId.eq(value))
+            select.filter(COLUMN.provider_id.eq(value))
         })
         .apply_if(filter.enabled, |select, value| {
-            select.filter(Column::Enabled.eq(value))
+            select.filter(COLUMN.enabled.eq(value))
         })
         .apply_if(filter.health, |select, value| select.filter(health(value)))
 }
@@ -198,7 +199,7 @@ impl IdentityProviderRepository for PostgresIdentityProviderRepository {
         id: Uuid,
     ) -> Result<Option<Unscoped<IdentityProvider>>, CoreError> {
         let identity_provider = IdentityProviderEntity::find()
-            .filter(Column::Id.eq(id))
+            .filter(COLUMN.id.eq(id))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -219,8 +220,8 @@ impl IdentityProviderRepository for PostgresIdentityProviderRepository {
         alias: &str,
     ) -> Result<Option<IdentityProvider>, CoreError> {
         let identity_provider = IdentityProviderEntity::find()
-            .filter(Column::RealmId.eq::<Uuid>(realm_id.into()))
-            .filter(Column::Alias.eq(alias))
+            .filter(COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
+            .filter(COLUMN.alias.eq(alias))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -240,14 +241,14 @@ impl IdentityProviderRepository for PostgresIdentityProviderRepository {
         only_enabled: Option<bool>,
     ) -> Result<Vec<IdentityProvider>, CoreError> {
         let mut query =
-            IdentityProviderEntity::find().filter(Column::RealmId.eq::<Uuid>(realm_id.into()));
+            IdentityProviderEntity::find().filter(COLUMN.realm_id.eq::<Uuid>(realm_id.into()));
 
         if only_enabled.unwrap_or(false) {
-            query = query.filter(Column::Enabled.eq(true))
+            query = query.filter(COLUMN.enabled.eq(true))
         }
 
         let identity_providers = query
-            .order_by_asc(Column::Alias)
+            .order_by_asc(COLUMN.alias)
             .all(&self.db)
             .await
             .map_err(|e| {
@@ -291,7 +292,7 @@ impl IdentityProviderRepository for PostgresIdentityProviderRepository {
         request: UpdateIdentityProviderRequest,
     ) -> Result<IdentityProvider, CoreError> {
         let existing = IdentityProviderEntity::find()
-            .filter(Column::Id.eq::<Uuid>(provider.get().id.into()))
+            .filter(COLUMN.id.eq::<Uuid>(provider.get().id.into()))
             .one(&self.db)
             .await
             .map_err(|e| {
@@ -354,7 +355,7 @@ impl IdentityProviderRepository for PostgresIdentityProviderRepository {
         provider: &Scoped<IdentityProvider>,
     ) -> Result<(), CoreError> {
         let result = IdentityProviderEntity::delete_many()
-            .filter(Column::Id.eq::<Uuid>(provider.get().id.into()))
+            .filter(COLUMN.id.eq::<Uuid>(provider.get().id.into()))
             .exec(&self.db)
             .await
             .map_err(|e| {
@@ -376,8 +377,8 @@ impl IdentityProviderRepository for PostgresIdentityProviderRepository {
         alias: &str,
     ) -> Result<bool, CoreError> {
         let count = IdentityProviderEntity::find()
-            .filter(Column::RealmId.eq::<Uuid>(realm_id.into()))
-            .filter(Column::Alias.eq(alias))
+            .filter(COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
+            .filter(COLUMN.alias.eq(alias))
             .count(&self.db)
             .await
             .map_err(|e| {

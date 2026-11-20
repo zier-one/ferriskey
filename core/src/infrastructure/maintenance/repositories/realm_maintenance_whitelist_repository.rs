@@ -1,10 +1,9 @@
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use crate::entity::realm_maintenance_whitelist::COLUMN;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::domain::common::entities::app_errors::CoreError;
-use crate::entity::realm_maintenance_whitelist::{ActiveModel, Column, Entity as WhitelistEntity};
+use crate::entity::realm_maintenance_whitelist::{ActiveModel, Entity as WhitelistEntity};
 use ferriskey_domain::maintenance::{
     entities::RealmMaintenanceWhitelistEntry, ports::RealmMaintenanceWhitelistRepository,
 };
@@ -82,7 +81,7 @@ impl RealmMaintenanceWhitelistRepository for PostgresRealmMaintenanceWhitelistRe
         entry: &Scoped<RealmMaintenanceWhitelistEntry>,
     ) -> Result<(), CoreError> {
         let result = WhitelistEntity::delete_many()
-            .filter(Column::Id.eq(entry.get().id))
+            .filter(COLUMN.id.eq(entry.get().id))
             .exec(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;
@@ -97,7 +96,7 @@ impl RealmMaintenanceWhitelistRepository for PostgresRealmMaintenanceWhitelistRe
         realm_id: RealmId,
     ) -> Result<Vec<RealmMaintenanceWhitelistEntry>, CoreError> {
         let models = WhitelistEntity::find()
-            .filter(Column::RealmId.eq::<Uuid>(realm_id.into()))
+            .filter(COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
             .all(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;
@@ -107,8 +106,8 @@ impl RealmMaintenanceWhitelistRepository for PostgresRealmMaintenanceWhitelistRe
 
     async fn get_whitelisted_user_ids(&self, realm_id: RealmId) -> Result<Vec<Uuid>, CoreError> {
         let models = WhitelistEntity::find()
-            .filter(Column::RealmId.eq::<Uuid>(realm_id.into()))
-            .filter(Column::UserId.is_not_null())
+            .filter(COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
+            .filter(COLUMN.user_id.is_not_null())
             .all(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;
@@ -118,8 +117,8 @@ impl RealmMaintenanceWhitelistRepository for PostgresRealmMaintenanceWhitelistRe
 
     async fn get_whitelisted_role_ids(&self, realm_id: RealmId) -> Result<Vec<Uuid>, CoreError> {
         let models = WhitelistEntity::find()
-            .filter(Column::RealmId.eq::<Uuid>(realm_id.into()))
-            .filter(Column::RoleId.is_not_null())
+            .filter(COLUMN.realm_id.eq::<Uuid>(realm_id.into()))
+            .filter(COLUMN.role_id.is_not_null())
             .all(&self.db)
             .await
             .map_err(|e| CoreError::Database(e.to_string()))?;
