@@ -28,6 +28,7 @@ use crate::{
         realm::entities::{RealmScope, Scoped, Unscoped},
     },
     entity::portal_themes::{ActiveModel, Column, Entity, Model},
+    infrastructure::common::map_transaction_error,
     infrastructure::pagination::{SortColumn, contains, paginate, within_naive},
 };
 
@@ -393,29 +394,30 @@ impl PortalThemeRepository for PostgresPortalThemeRepository {
     async fn activate(&self, theme: &Scoped<PortalTheme>) -> Result<(), CoreError> {
         let realm_id: Uuid = theme.get().realm_id.into();
         let theme_id = theme.get().id;
-        let txn = self.db.begin().await.map_err(|e| {
-            error!("failed to begin activate transaction: {e}");
-            CoreError::InternalServerError
-        })?;
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    Entity::find_by_id(theme_id)
+                        .filter(portal_themes::COLUMN.realm_id.eq(realm_id))
+                        .one(txn)
+                        .await
+                        .map_err(|e| {
+                            error!("failed to fetch target theme for activate: {e}");
+                            CoreError::InternalServerError
+                        })?
+                        .ok_or(CoreError::NotFound)?;
 
-        Entity::find_by_id(theme_id)
-            .filter(portal_themes::COLUMN.realm_id.eq(realm_id))
-            .one(&txn)
+                    set_realm_active_theme(txn, realm_id, Some(theme_id)).await?;
+                    Ok(())
+                })
+            })
             .await
             .map_err(|e| {
-                error!("failed to fetch target theme for activate: {e}");
-                CoreError::InternalServerError
-            })?
-            .ok_or(CoreError::NotFound)?;
-
-        set_realm_active_theme(&txn, realm_id, Some(theme_id)).await?;
-
-        txn.commit().await.map_err(|e| {
-            error!("failed to commit activate transaction: {e}");
-            CoreError::InternalServerError
-        })?;
-
-        Ok(())
+                map_transaction_error(e, |e| {
+                    error!("failed to activate portal theme transaction: {e}");
+                    CoreError::InternalServerError
+                })
+            })
     }
 
     async fn delete(&self, theme: &Scoped<PortalTheme>) -> Result<(), CoreError> {

@@ -31,6 +31,7 @@ use crate::{
         portal_layouts::{ActiveModel, Column, Entity, Model},
         portal_themes,
     },
+    infrastructure::common::map_transaction_error,
     infrastructure::pagination::{SortColumn, contains, paginate, within_naive},
 };
 
@@ -276,59 +277,62 @@ impl PortalLayoutsRepository for PostgresPortalLayoutsRepository {
     async fn set_default(&self, layout: &Scoped<PortalLayout>) -> Result<PortalLayout, CoreError> {
         let realm_id: Uuid = layout.get().realm_id.into();
         let layout_id = layout.get().id;
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    // Confirm the target layout exists in this realm.
+                    let target = Entity::find_by_id(layout_id)
+                        .filter(portal_layouts::COLUMN.realm_id.eq(realm_id))
+                        .one(txn)
+                        .await
+                        .map_err(|e| {
+                            error!("failed to fetch target layout: {e}");
+                            CoreError::InternalServerError
+                        })?
+                        .ok_or(CoreError::NotFound)?;
 
-        let txn = self.db.begin().await.map_err(|e| {
-            error!("failed to begin set_default transaction: {e}");
-            CoreError::InternalServerError
-        })?;
+                    let now = Utc::now().naive_utc();
 
-        // Confirm the target layout exists in this realm.
-        let target = Entity::find_by_id(layout_id)
-            .filter(portal_layouts::COLUMN.realm_id.eq(realm_id))
-            .one(&txn)
+                    // Clear any current default in the realm (no-op if none).
+                    Entity::update_many()
+                        .col_expr(
+                            portal_layouts::COLUMN.is_default,
+                            sea_orm::sea_query::Expr::value(false),
+                        )
+                        .col_expr(
+                            portal_layouts::COLUMN.updated_at,
+                            sea_orm::sea_query::Expr::value(now),
+                        )
+                        .filter(portal_layouts::COLUMN.realm_id.eq(realm_id))
+                        .filter(portal_layouts::COLUMN.is_default.eq(true))
+                        .exec(txn)
+                        .await
+                        .map_err(|e| {
+                            error!("failed to clear existing default layout: {e}");
+                            CoreError::InternalServerError
+                        })?;
+
+                    let mut active: ActiveModel = target.into();
+                    active.is_default = Set(true);
+                    active.updated_at = Set(now);
+
+                    Entity::update(active)
+                        .exec(txn)
+                        .await
+                        .map(Into::into)
+                        .map_err(|e| {
+                            error!("failed to mark layout as default: {e}");
+                            CoreError::InternalServerError
+                        })
+                })
+            })
             .await
             .map_err(|e| {
-                error!("failed to fetch target layout: {e}");
-                CoreError::InternalServerError
-            })?
-            .ok_or(CoreError::NotFound)?;
-
-        let now = Utc::now().naive_utc();
-
-        // Clear any current default in the realm (no-op if none).
-        Entity::update_many()
-            .col_expr(
-                portal_layouts::COLUMN.is_default,
-                sea_orm::sea_query::Expr::value(false),
-            )
-            .col_expr(
-                portal_layouts::COLUMN.updated_at,
-                sea_orm::sea_query::Expr::value(now),
-            )
-            .filter(portal_layouts::COLUMN.realm_id.eq(realm_id))
-            .filter(portal_layouts::COLUMN.is_default.eq(true))
-            .exec(&txn)
-            .await
-            .map_err(|e| {
-                error!("failed to clear existing default layout: {e}");
-                CoreError::InternalServerError
-            })?;
-
-        let mut active: ActiveModel = target.into();
-        active.is_default = Set(true);
-        active.updated_at = Set(now);
-
-        let updated = Entity::update(active).exec(&txn).await.map_err(|e| {
-            error!("failed to mark layout as default: {e}");
-            CoreError::InternalServerError
-        })?;
-
-        txn.commit().await.map_err(|e| {
-            error!("failed to commit set_default transaction: {e}");
-            CoreError::InternalServerError
-        })?;
-
-        Ok(updated.into())
+                map_transaction_error(e, |e| {
+                    error!("failed to set default layout transaction: {e}");
+                    CoreError::InternalServerError
+                })
+            })
     }
 
     async fn delete(&self, layout: &Scoped<PortalLayout>) -> Result<(), CoreError> {

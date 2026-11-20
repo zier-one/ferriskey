@@ -27,6 +27,7 @@ use crate::entity::{
     authz_policies, authz_policy_templates, authz_realm_states, authz_relation_tuples,
     authz_schemas,
 };
+use crate::infrastructure::common::map_transaction_error;
 
 /// Stores a realm's tenant authorization rules.
 ///
@@ -308,33 +309,37 @@ impl AuthzSchemaRepository for PostgresAuthzRepository {
     ) -> Result<AuthzSchema, CoreError> {
         let realm_id = Uuid::from(realm.id());
         let now = schema.updated_at.naive_utc();
-        let txn = self.db.begin().await.map_err(internal("begin"))?;
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    bump_version(txn, realm_id, expected_version).await?;
 
-        bump_version(&txn, realm_id, expected_version).await?;
+                    let model = authz_schemas::Entity::insert(authz_schemas::ActiveModel {
+                        id: Set(schema.id),
+                        realm_id: Set(realm_id),
+                        namespace: Set(schema.namespace.to_string()),
+                        source: Set(schema.source),
+                        created_at: Set(now),
+                        updated_at: Set(now),
+                    })
+                    .on_conflict(
+                        OnConflict::column(authz_schemas::COLUMN.realm_id)
+                            .update_columns([
+                                authz_schemas::Column::Namespace,
+                                authz_schemas::Column::Source,
+                                authz_schemas::Column::UpdatedAt,
+                            ])
+                            .to_owned(),
+                    )
+                    .exec_with_returning(txn)
+                    .await
+                    .map_err(on_write)?;
 
-        let model = authz_schemas::Entity::insert(authz_schemas::ActiveModel {
-            id: Set(schema.id),
-            realm_id: Set(realm_id),
-            namespace: Set(schema.namespace.to_string()),
-            source: Set(schema.source),
-            created_at: Set(now),
-            updated_at: Set(now),
-        })
-        .on_conflict(
-            OnConflict::column(authz_schemas::COLUMN.realm_id)
-                .update_columns([
-                    authz_schemas::Column::Namespace,
-                    authz_schemas::Column::Source,
-                    authz_schemas::Column::UpdatedAt,
-                ])
-                .to_owned(),
-        )
-        .exec_with_returning(&txn)
-        .await
-        .map_err(on_write)?;
-
-        txn.commit().await.map_err(internal("commit"))?;
-        schema_from_db(model)
+                    schema_from_db(model)
+                })
+            })
+            .await
+            .map_err(|e| map_transaction_error(e, internal("replace authz schema")))
     }
 }
 
@@ -370,62 +375,67 @@ impl PolicyRepository for PostgresAuthzRepository {
             ),
         };
 
-        let txn = self.db.begin().await.map_err(internal("begin"))?;
-        bump_version(&txn, realm_id, expected_version).await?;
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    bump_version(txn, realm_id, expected_version).await?;
 
-        let updated = authz_policies::Entity::update_many()
-            .col_expr(
-                authz_policies::COLUMN.name,
-                Expr::value(policy.name.as_str()),
-            )
-            .col_expr(
-                authz_policies::COLUMN.description,
-                Expr::value(policy.description.clone()),
-            )
-            .col_expr(
-                authz_policies::COLUMN.origin,
-                Expr::value(origin_to_db(policy.origin)),
-            )
-            .col_expr(authz_policies::COLUMN.enabled, Expr::value(policy.enabled))
-            .col_expr(
-                authz_policies::COLUMN.managed_by,
-                Expr::value(policy.managed_by.as_ref().map(ManagedBy::as_str)),
-            )
-            .col_expr(authz_policies::COLUMN.source, Expr::value(source.clone()))
-            .col_expr(authz_policies::COLUMN.template_id, Expr::value(template_id))
-            .col_expr(
-                authz_policies::COLUMN.template_links,
-                Expr::value(template_links.clone()),
-            )
-            .col_expr(authz_policies::COLUMN.updated_at, Expr::value(now))
-            .filter(authz_policies::COLUMN.id.eq(policy.id))
-            .filter(authz_policies::COLUMN.realm_id.eq(realm_id))
-            .exec(&txn)
-            .await
-            .map_err(on_policy_write(&policy.name))?;
+                    let updated = authz_policies::Entity::update_many()
+                        .col_expr(
+                            authz_policies::COLUMN.name,
+                            Expr::value(policy.name.as_str()),
+                        )
+                        .col_expr(
+                            authz_policies::COLUMN.description,
+                            Expr::value(policy.description.clone()),
+                        )
+                        .col_expr(
+                            authz_policies::COLUMN.origin,
+                            Expr::value(origin_to_db(policy.origin)),
+                        )
+                        .col_expr(authz_policies::COLUMN.enabled, Expr::value(policy.enabled))
+                        .col_expr(
+                            authz_policies::COLUMN.managed_by,
+                            Expr::value(policy.managed_by.as_ref().map(ManagedBy::as_str)),
+                        )
+                        .col_expr(authz_policies::COLUMN.source, Expr::value(source.clone()))
+                        .col_expr(authz_policies::COLUMN.template_id, Expr::value(template_id))
+                        .col_expr(
+                            authz_policies::COLUMN.template_links,
+                            Expr::value(template_links.clone()),
+                        )
+                        .col_expr(authz_policies::COLUMN.updated_at, Expr::value(now))
+                        .filter(authz_policies::COLUMN.id.eq(policy.id))
+                        .filter(authz_policies::COLUMN.realm_id.eq(realm_id))
+                        .exec(txn)
+                        .await
+                        .map_err(on_policy_write(&policy.name))?;
 
-        if updated.rows_affected == 0 {
-            authz_policies::Entity::insert(authz_policies::ActiveModel {
-                id: Set(policy.id),
-                realm_id: Set(realm_id),
-                name: Set(policy.name.to_string()),
-                description: Set(policy.description.clone()),
-                origin: Set(origin_to_db(policy.origin).to_string()),
-                enabled: Set(policy.enabled),
-                managed_by: Set(policy.managed_by.as_ref().map(ToString::to_string)),
-                source: Set(source),
-                template_id: Set(template_id),
-                template_links: Set(template_links),
-                created_at: Set(now),
-                updated_at: Set(now),
+                    if updated.rows_affected == 0 {
+                        authz_policies::Entity::insert(authz_policies::ActiveModel {
+                            id: Set(policy.id),
+                            realm_id: Set(realm_id),
+                            name: Set(policy.name.to_string()),
+                            description: Set(policy.description.clone()),
+                            origin: Set(origin_to_db(policy.origin).to_string()),
+                            enabled: Set(policy.enabled),
+                            managed_by: Set(policy.managed_by.as_ref().map(ToString::to_string)),
+                            source: Set(source),
+                            template_id: Set(template_id),
+                            template_links: Set(template_links),
+                            created_at: Set(now),
+                            updated_at: Set(now),
+                        })
+                        .exec_without_returning(txn)
+                        .await
+                        .map_err(on_policy_write(&policy.name))?;
+                    }
+
+                    Ok(policy)
+                })
             })
-            .exec_without_returning(&txn)
             .await
-            .map_err(on_policy_write(&policy.name))?;
-        }
-
-        txn.commit().await.map_err(internal("commit"))?;
-        Ok(policy)
+            .map_err(|e| map_transaction_error(e, internal("save authz policy")))
     }
 
     async fn delete(
@@ -435,20 +445,26 @@ impl PolicyRepository for PostgresAuthzRepository {
         expected_version: i64,
     ) -> Result<(), CoreError> {
         let realm_id = Uuid::from(realm.id());
-        let txn = self.db.begin().await.map_err(internal("begin"))?;
-        bump_version(&txn, realm_id, expected_version).await?;
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    bump_version(txn, realm_id, expected_version).await?;
 
-        let deleted = authz_policies::Entity::delete_many()
-            .filter(authz_policies::COLUMN.id.eq(id))
-            .filter(authz_policies::COLUMN.realm_id.eq(realm_id))
-            .exec(&txn)
+                    let deleted = authz_policies::Entity::delete_many()
+                        .filter(authz_policies::COLUMN.id.eq(id))
+                        .filter(authz_policies::COLUMN.realm_id.eq(realm_id))
+                        .exec(txn)
+                        .await
+                        .map_err(internal("delete authz policy"))?;
+                    if deleted.rows_affected == 0 {
+                        return Err(CoreError::NotFound);
+                    }
+
+                    Ok(())
+                })
+            })
             .await
-            .map_err(internal("delete authz policy"))?;
-        if deleted.rows_affected == 0 {
-            return Err(CoreError::NotFound);
-        }
-
-        txn.commit().await.map_err(internal("commit"))
+            .map_err(|e| map_transaction_error(e, internal("delete authz policy")))
     }
 }
 
@@ -476,46 +492,53 @@ impl PolicyTemplateRepository for PostgresAuthzRepository {
     ) -> Result<PolicyTemplate, CoreError> {
         let realm_id = Uuid::from(realm.id());
         let now = Utc::now().naive_utc();
-        let txn = self.db.begin().await.map_err(internal("begin"))?;
-        bump_version(&txn, realm_id, expected_version).await?;
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    bump_version(txn, realm_id, expected_version).await?;
 
-        let updated = authz_policy_templates::Entity::update_many()
-            .col_expr(
-                authz_policy_templates::COLUMN.name,
-                Expr::value(template.name.as_str()),
-            )
-            .col_expr(
-                authz_policy_templates::COLUMN.description,
-                Expr::value(template.description.clone()),
-            )
-            .col_expr(
-                authz_policy_templates::COLUMN.source,
-                Expr::value(template.source.as_str()),
-            )
-            .col_expr(authz_policy_templates::COLUMN.updated_at, Expr::value(now))
-            .filter(authz_policy_templates::COLUMN.id.eq(template.id))
-            .filter(authz_policy_templates::COLUMN.realm_id.eq(realm_id))
-            .exec(&txn)
-            .await
-            .map_err(on_write)?;
+                    let updated = authz_policy_templates::Entity::update_many()
+                        .col_expr(
+                            authz_policy_templates::COLUMN.name,
+                            Expr::value(template.name.as_str()),
+                        )
+                        .col_expr(
+                            authz_policy_templates::COLUMN.description,
+                            Expr::value(template.description.clone()),
+                        )
+                        .col_expr(
+                            authz_policy_templates::COLUMN.source,
+                            Expr::value(template.source.as_str()),
+                        )
+                        .col_expr(authz_policy_templates::COLUMN.updated_at, Expr::value(now))
+                        .filter(authz_policy_templates::COLUMN.id.eq(template.id))
+                        .filter(authz_policy_templates::COLUMN.realm_id.eq(realm_id))
+                        .exec(txn)
+                        .await
+                        .map_err(on_write)?;
 
-        if updated.rows_affected == 0 {
-            authz_policy_templates::Entity::insert(authz_policy_templates::ActiveModel {
-                id: Set(template.id),
-                realm_id: Set(realm_id),
-                name: Set(template.name.to_string()),
-                description: Set(template.description.clone()),
-                source: Set(template.source.clone()),
-                created_at: Set(now),
-                updated_at: Set(now),
+                    if updated.rows_affected == 0 {
+                        authz_policy_templates::Entity::insert(
+                            authz_policy_templates::ActiveModel {
+                                id: Set(template.id),
+                                realm_id: Set(realm_id),
+                                name: Set(template.name.to_string()),
+                                description: Set(template.description.clone()),
+                                source: Set(template.source.clone()),
+                                created_at: Set(now),
+                                updated_at: Set(now),
+                            },
+                        )
+                        .exec_without_returning(txn)
+                        .await
+                        .map_err(on_write)?;
+                    }
+
+                    Ok(template)
+                })
             })
-            .exec_without_returning(&txn)
             .await
-            .map_err(on_write)?;
-        }
-
-        txn.commit().await.map_err(internal("commit"))?;
-        Ok(template)
+            .map_err(|e| map_transaction_error(e, internal("save authz template")))
     }
 
     async fn delete(
@@ -525,28 +548,34 @@ impl PolicyTemplateRepository for PostgresAuthzRepository {
         expected_version: i64,
     ) -> Result<(), CoreError> {
         let realm_id = Uuid::from(realm.id());
-        let txn = self.db.begin().await.map_err(internal("begin"))?;
-        bump_version(&txn, realm_id, expected_version).await?;
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    bump_version(txn, realm_id, expected_version).await?;
 
-        let deleted = authz_policy_templates::Entity::delete_many()
-            .filter(authz_policy_templates::COLUMN.id.eq(id))
-            .filter(authz_policy_templates::COLUMN.realm_id.eq(realm_id))
-            .exec(&txn)
+                    let deleted = authz_policy_templates::Entity::delete_many()
+                        .filter(authz_policy_templates::COLUMN.id.eq(id))
+                        .filter(authz_policy_templates::COLUMN.realm_id.eq(realm_id))
+                        .exec(txn)
+                        .await
+                        .map_err(|e| match e.sql_err() {
+                            Some(SqlErr::ForeignKeyConstraintViolation(_)) => {
+                                CoreError::AuthorizationTemplateInUse
+                            }
+                            _ => {
+                                error!("delete authz template: {e}");
+                                CoreError::InternalServerError
+                            }
+                        })?;
+                    if deleted.rows_affected == 0 {
+                        return Err(CoreError::NotFound);
+                    }
+
+                    Ok(())
+                })
+            })
             .await
-            .map_err(|e| match e.sql_err() {
-                Some(SqlErr::ForeignKeyConstraintViolation(_)) => {
-                    CoreError::AuthorizationTemplateInUse
-                }
-                _ => {
-                    error!("delete authz template: {e}");
-                    CoreError::InternalServerError
-                }
-            })?;
-        if deleted.rows_affected == 0 {
-            return Err(CoreError::NotFound);
-        }
-
-        txn.commit().await.map_err(internal("commit"))
+            .map_err(|e| map_transaction_error(e, internal("delete authz template")))
     }
 }
 
@@ -558,56 +587,62 @@ impl RelationTupleRepository for PostgresAuthzRepository {
         deletes: Vec<RelationTuple>,
     ) -> Result<(), CoreError> {
         let realm_id = Uuid::from(realm.id());
-        let txn = self.db.begin().await.map_err(internal("begin"))?;
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    if !deletes.is_empty() {
+                        let any_of = deletes.iter().fold(Condition::any(), |cond, tuple| {
+                            cond.add(tuple_key(realm_id, tuple))
+                        });
+                        authz_relation_tuples::Entity::delete_many()
+                            .filter(any_of)
+                            .exec(txn)
+                            .await
+                            .map_err(internal("delete authz tuples"))?;
+                    }
 
-        if !deletes.is_empty() {
-            let any_of = deletes.iter().fold(Condition::any(), |cond, tuple| {
-                cond.add(tuple_key(realm_id, tuple))
-            });
-            authz_relation_tuples::Entity::delete_many()
-                .filter(any_of)
-                .exec(&txn)
-                .await
-                .map_err(internal("delete authz tuples"))?;
-        }
+                    if !writes.is_empty() {
+                        let now = Utc::now().naive_utc();
+                        let rows =
+                            writes
+                                .into_iter()
+                                .map(|tuple| authz_relation_tuples::ActiveModel {
+                                    realm_id: Set(realm_id),
+                                    object_type: Set(tuple.object.ty.to_string()),
+                                    object_id: Set(tuple.object.id),
+                                    relation: Set(tuple.relation.into()),
+                                    subject_type: Set(tuple.subject.ty.to_string()),
+                                    subject_id: Set(tuple.subject.id),
+                                    subject_relation: Set(tuple
+                                        .subject_relation
+                                        .map(String::from)
+                                        .unwrap_or_default()),
+                                    created_at: Set(now),
+                                });
+                        authz_relation_tuples::Entity::insert_many(rows)
+                            .on_conflict(
+                                OnConflict::columns([
+                                    authz_relation_tuples::Column::RealmId,
+                                    authz_relation_tuples::Column::ObjectType,
+                                    authz_relation_tuples::Column::ObjectId,
+                                    authz_relation_tuples::Column::Relation,
+                                    authz_relation_tuples::Column::SubjectType,
+                                    authz_relation_tuples::Column::SubjectId,
+                                    authz_relation_tuples::Column::SubjectRelation,
+                                ])
+                                .do_nothing()
+                                .to_owned(),
+                            )
+                            .exec_without_returning(txn)
+                            .await
+                            .map_err(internal("write authz tuples"))?;
+                    }
 
-        if !writes.is_empty() {
-            let now = Utc::now().naive_utc();
-            let rows = writes
-                .into_iter()
-                .map(|tuple| authz_relation_tuples::ActiveModel {
-                    realm_id: Set(realm_id),
-                    object_type: Set(tuple.object.ty.to_string()),
-                    object_id: Set(tuple.object.id),
-                    relation: Set(tuple.relation.into()),
-                    subject_type: Set(tuple.subject.ty.to_string()),
-                    subject_id: Set(tuple.subject.id),
-                    subject_relation: Set(tuple
-                        .subject_relation
-                        .map(String::from)
-                        .unwrap_or_default()),
-                    created_at: Set(now),
-                });
-            authz_relation_tuples::Entity::insert_many(rows)
-                .on_conflict(
-                    OnConflict::columns([
-                        authz_relation_tuples::Column::RealmId,
-                        authz_relation_tuples::Column::ObjectType,
-                        authz_relation_tuples::Column::ObjectId,
-                        authz_relation_tuples::Column::Relation,
-                        authz_relation_tuples::Column::SubjectType,
-                        authz_relation_tuples::Column::SubjectId,
-                        authz_relation_tuples::Column::SubjectRelation,
-                    ])
-                    .do_nothing()
-                    .to_owned(),
-                )
-                .exec_without_returning(&txn)
-                .await
-                .map_err(internal("write authz tuples"))?;
-        }
-
-        txn.commit().await.map_err(internal("commit"))
+                    Ok(())
+                })
+            })
+            .await
+            .map_err(|e| map_transaction_error(e, internal("write authz tuples")))
     }
 
     async fn delete_by_subject(

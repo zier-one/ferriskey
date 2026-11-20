@@ -22,6 +22,7 @@ use crate::domain::realm::{
     ports::RealmRepository,
 };
 use crate::entity::realms;
+use crate::infrastructure::common::map_transaction_error;
 use crate::infrastructure::pagination::{SortColumn, contains, paginate};
 use ferriskey_domain::realm::LoginAliases;
 use tracing::{error, info_span};
@@ -460,36 +461,33 @@ impl RealmRepository for PostgresRealmRepository {
             realm_setting.require_pushed_authorization_requests = Set(required);
         }
 
-        let txn = self
-            .db
-            .begin()
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    let realm_setting = realm_setting
+                        .update(txn)
+                        .await
+                        .map_err(|_| CoreError::InternalServerError)?
+                        .into();
+
+                    if let Some(retained) = retained_resources {
+                        crate::entity::realm_resource_owners::Entity::delete_many()
+                            .filter(
+                                realm_resource_owners::COLUMN
+                                    .realm_id
+                                    .eq::<Uuid>(realm_id.into()),
+                            )
+                            .filter(realm_resource_owners::COLUMN.uri.is_not_in(retained))
+                            .exec(txn)
+                            .await
+                            .map_err(|_| CoreError::InternalServerError)?;
+                    }
+
+                    Ok(realm_setting)
+                })
+            })
             .await
-            .map_err(|_| CoreError::InternalServerError)?;
-
-        let realm_setting = realm_setting
-            .update(&txn)
-            .await
-            .map_err(|_| CoreError::InternalServerError)?
-            .into();
-
-        if let Some(retained) = retained_resources {
-            crate::entity::realm_resource_owners::Entity::delete_many()
-                .filter(
-                    realm_resource_owners::COLUMN
-                        .realm_id
-                        .eq::<Uuid>(realm_id.into()),
-                )
-                .filter(realm_resource_owners::COLUMN.uri.is_not_in(retained))
-                .exec(&txn)
-                .await
-                .map_err(|_| CoreError::InternalServerError)?;
-        }
-
-        txn.commit()
-            .await
-            .map_err(|_| CoreError::InternalServerError)?;
-
-        Ok(realm_setting)
+            .map_err(|e| map_transaction_error(e, |_| CoreError::InternalServerError))
     }
 
     async fn get_realm_settings(

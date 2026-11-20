@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::{
     domain::common::entities::app_errors::CoreError,
     entity::clients::{ActiveModel, Entity as ClientEntity},
-    infrastructure::common::is_unique_violation,
+    infrastructure::common::{is_unique_violation, map_transaction_error},
 };
 use chrono::{DateTime, Utc};
 use ferriskey_security::crypto::secret_cipher::SecretCipher;
@@ -535,69 +535,72 @@ impl ClientRepository for PostgresClientRepository {
         grace_period: Option<chrono::Duration>,
     ) -> Result<SecretRotation, CoreError> {
         let id = client.get().id;
-        let transaction = self.db.begin().await.map_err(|e| {
-            error!("failed to begin a client secret rotation: {:?}", e);
-            CoreError::InternalServerError
-        })?;
+        let realm_id = Uuid::from(client.get().realm_id);
+        let repository = self.clone();
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    let row = ClientEntity::find()
+                        .filter(clients::COLUMN.id.eq(id))
+                        .filter(clients::COLUMN.realm_id.eq(realm_id))
+                        .lock_exclusive()
+                        .one(txn)
+                        .await
+                        .map_err(|_| CoreError::InternalServerError)?
+                        .ok_or(CoreError::NotFound)?;
 
-        let row = ClientEntity::find()
-            .filter(clients::COLUMN.id.eq(id))
-            .filter(
-                clients::COLUMN
-                    .realm_id
-                    .eq(Uuid::from(client.get().realm_id)),
-            )
-            .lock_exclusive()
-            .one(&transaction)
-            .await
-            .map_err(|_| CoreError::InternalServerError)?
-            .ok_or(CoreError::NotFound)?;
+                    let now = Utc::now();
+                    let replaced_expired =
+                        match (&row.previous_secret, row.previous_secret_expires_at) {
+                            (Some(_), Some(expired_at)) if expired_at.and_utc() <= now => {
+                                Some(ExpiredClientSecret {
+                                    client_id: id,
+                                    realm_id: RealmId::from(row.realm_id),
+                                    expired_at: expired_at.and_utc(),
+                                })
+                            }
+                            _ => None,
+                        };
+                    let previous_expires_at = grace_period.map(|grace| now + grace);
 
-        let now = Utc::now();
-        let replaced_expired = match (&row.previous_secret, row.previous_secret_expires_at) {
-            (Some(_), Some(expired_at)) if expired_at.and_utc() <= now => {
-                Some(ExpiredClientSecret {
-                    client_id: id,
-                    realm_id: RealmId::from(row.realm_id),
-                    expired_at: expired_at.and_utc(),
+                    let current = row
+                        .secret
+                        .as_deref()
+                        .map(|stored| repository.open_secret(CLIENT_SECRET_PURPOSE, id, stored))
+                        .transpose()?;
+                    let previous = match (current, previous_expires_at) {
+                        (Some(secret), Some(expires_at)) => {
+                            Some((repository.seal_previous_secret(id, &secret)?, expires_at))
+                        }
+                        _ => None,
+                    };
+
+                    let mut active = row.into_active_model();
+                    active.secret = Set(repository.seal_secret(id, Some(new_secret))?);
+                    active.previous_secret =
+                        Set(previous.as_ref().map(|(secret, _)| secret.clone()));
+                    active.previous_secret_expires_at =
+                        Set(previous.map(|(_, expires_at)| expires_at.naive_utc()));
+                    active.updated_at = Set(now.naive_utc());
+
+                    let updated = active.update(txn).await.map_err(|e| {
+                        error!("failed to rotate a client secret: {:?}", e);
+                        CoreError::InternalServerError
+                    })?;
+
+                    Ok(SecretRotation {
+                        client: repository.client_of(updated)?,
+                        replaced_expired,
+                    })
                 })
-            }
-            _ => None,
-        };
-        let previous_expires_at = grace_period.map(|grace| now + grace);
-
-        let current = row
-            .secret
-            .as_deref()
-            .map(|stored| self.open_secret(CLIENT_SECRET_PURPOSE, id, stored))
-            .transpose()?;
-        let previous = match (current, previous_expires_at) {
-            (Some(secret), Some(expires_at)) => {
-                Some((self.seal_previous_secret(id, &secret)?, expires_at))
-            }
-            _ => None,
-        };
-
-        let mut active = row.into_active_model();
-        active.secret = Set(self.seal_secret(id, Some(new_secret))?);
-        active.previous_secret = Set(previous.as_ref().map(|(secret, _)| secret.clone()));
-        active.previous_secret_expires_at =
-            Set(previous.map(|(_, expires_at)| expires_at.naive_utc()));
-        active.updated_at = Set(now.naive_utc());
-
-        let updated = active.update(&transaction).await.map_err(|e| {
-            error!("failed to rotate a client secret: {:?}", e);
-            CoreError::InternalServerError
-        })?;
-        transaction.commit().await.map_err(|e| {
-            error!("failed to commit a client secret rotation: {:?}", e);
-            CoreError::InternalServerError
-        })?;
-
-        Ok(SecretRotation {
-            client: self.client_of(updated)?,
-            replaced_expired,
-        })
+            })
+            .await
+            .map_err(|e| {
+                map_transaction_error(e, |e| {
+                    error!("failed to rotate a client secret transaction: {:?}", e);
+                    CoreError::InternalServerError
+                })
+            })
     }
 
     async fn revoke_previous_secret(&self, client: &Scoped<Client>) -> Result<bool, CoreError> {

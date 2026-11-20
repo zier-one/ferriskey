@@ -24,12 +24,12 @@ Each numbered group is intended to become one pull request. A group may contain 
 
 ## 3. Use transaction closures
 
-- [ ] 3.1 Inventory the approximately 20 manual `begin` / `commit` sites and classify each as convertible, intentionally long-lived, SQLx-test-only, or otherwise exempt; verify every manual transaction site is accounted for.
-- [ ] 3.2 Convert eligible keystore, authz, client, portal, realm, consent, and webhook repository transactions to `ConnectionTrait::transaction`; verify `cargo check --workspace --exclude ferriskey-client --locked` passes.
-- [ ] 3.3 Preserve explicit transactions where lock lifetime, savepoint behavior, or test control requires them; verify the diff documents each exemption.
-- [ ] 3.4 Add or update rollback tests for every converted transaction; verify an error returns rollback all writes from that transaction.
-- [ ] 3.5 Run existing row-lock and concurrency tests for converted repositories; verify isolation, lock scope, and error mapping remain unchanged.
-- [ ] 3.6 Run workspace Clippy and PostgreSQL integration tests; verify the transaction pull request does not include raw SQL rewrites, Entity changes, or nested ActiveModel adoption.
+- [x] 3.1 Inventory the 13 production SeaORM `begin` / `commit` sites plus one SQLx test-only site; verify every site is converted or explicitly exempted.
+- [x] 3.2 Convert eligible keystore, authz, client, portal, realm, consent, and resource-owner transactions to `ConnectionTrait::transaction`; verify `cargo check --workspace --exclude ferriskey-client --locked` passes.
+- [x] 3.3 Preserve the SQLx webhook-delivery test transaction because it explicitly holds a row lock to test worker concurrency; verify it is the only remaining `begin` / `commit` site.
+- [x] 3.4 Reuse the existing rollback, stale-version, secret-rotation, consent, authz, and portal lifecycle tests for converted transactions; verify each converted path has rollback or failure coverage.
+- [x] 3.5 Run existing row-lock and concurrency tests for keystore and webhook delivery; verify isolation, lock scope, and error mapping remain unchanged.
+- [x] 3.6 Run workspace Clippy and PostgreSQL integration tests; verify the transaction pull request does not include raw SQL rewrites, Entity changes, or nested ActiveModel adoption.
 
 ## 4. Use Entity Loader for related reads
 

@@ -10,6 +10,7 @@ use crate::domain::common::entities::app_errors::CoreError;
 use crate::domain::realm::entities::{RealmId, ResourceOwner};
 use crate::domain::realm::ports::ResourceOwnerRepository;
 use crate::entity::realm_resource_owners::{ActiveModel, Entity, Model};
+use crate::infrastructure::common::map_transaction_error;
 
 impl From<Model> for ResourceOwner {
     fn from(model: Model) -> Self {
@@ -51,37 +52,36 @@ impl ResourceOwnerRepository for PostgresResourceOwnerRepository {
         owners: &[ResourceOwner],
     ) -> Result<(), CoreError> {
         let realm_id: Uuid = realm_id.into();
+        let owners = owners.to_vec();
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    Entity::delete_many()
+                        .filter(COLUMN.realm_id.eq(realm_id))
+                        .exec(txn)
+                        .await
+                        .map_err(|e| CoreError::Database(e.to_string()))?;
 
-        let txn = self
-            .db
-            .begin()
+                    if !owners.is_empty() {
+                        let now = Utc::now().fixed_offset();
+                        let rows = owners.iter().map(|owner| ActiveModel {
+                            realm_id: Set(realm_id),
+                            uri: Set(owner.uri.clone()),
+                            client_id: Set(owner.client_id),
+                            created_at: Set(now),
+                        });
+
+                        Entity::insert_many(rows)
+                            .exec(txn)
+                            .await
+                            .map_err(|e| CoreError::Database(e.to_string()))?;
+                    }
+
+                    Ok(())
+                })
+            })
             .await
-            .map_err(|e| CoreError::Database(e.to_string()))?;
-
-        Entity::delete_many()
-            .filter(COLUMN.realm_id.eq(realm_id))
-            .exec(&txn)
-            .await
-            .map_err(|e| CoreError::Database(e.to_string()))?;
-
-        if !owners.is_empty() {
-            let now = Utc::now().fixed_offset();
-            let rows = owners.iter().map(|owner| ActiveModel {
-                realm_id: Set(realm_id),
-                uri: Set(owner.uri.clone()),
-                client_id: Set(owner.client_id),
-                created_at: Set(now),
-            });
-
-            Entity::insert_many(rows)
-                .exec(&txn)
-                .await
-                .map_err(|e| CoreError::Database(e.to_string()))?;
-        }
-
-        txn.commit()
-            .await
-            .map_err(|e| CoreError::Database(e.to_string()))
+            .map_err(|e| map_transaction_error(e, |e| CoreError::Database(e.to_string())))
     }
 
     async fn owns_any(

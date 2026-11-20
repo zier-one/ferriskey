@@ -10,6 +10,7 @@ use ferriskey_domain::common::app_errors::CoreError;
 use ferriskey_domain::realm::RealmId;
 
 use crate::entity::{consent_session_scopes, consent_sessions, realm_settings};
+use crate::infrastructure::common::map_transaction_error;
 
 #[derive(Debug, Clone)]
 pub struct PostgresConsentDecisionRepository {
@@ -103,63 +104,59 @@ impl ConsentDecisionRepository for PostgresConsentDecisionRepository {
             updated_at: Set(decision.updated_at.naive_utc()),
         };
 
-        let transaction = self
-            .db
-            .begin()
+        self.db
+            .transaction::<_, _, CoreError>(|txn| {
+                Box::pin(async move {
+                    let model = consent_sessions::Entity::insert(payload)
+                        .on_conflict(
+                            OnConflict::columns([
+                                consent_sessions::COLUMN.realm_id,
+                                consent_sessions::COLUMN.user_id,
+                                consent_sessions::COLUMN.client_id,
+                            ])
+                            .update_columns([
+                                consent_sessions::COLUMN.expires_at,
+                                consent_sessions::COLUMN.updated_at,
+                            ])
+                            .to_owned(),
+                        )
+                        .exec_with_returning(txn)
+                        .await
+                        .map_err(|_| CoreError::InternalServerError)?;
+
+                    consent_session_scopes::Entity::delete_many()
+                        .filter(
+                            consent_session_scopes::COLUMN
+                                .consent_session_id
+                                .eq(model.id),
+                        )
+                        .exec(txn)
+                        .await
+                        .map_err(|_| CoreError::InternalServerError)?;
+
+                    let rows = scope_rows(model.id, &decision);
+                    if !rows.is_empty() {
+                        consent_session_scopes::Entity::insert_many(rows)
+                            .exec(txn)
+                            .await
+                            .map_err(|_| CoreError::InternalServerError)?;
+                    }
+
+                    let scopes = consent_session_scopes::Entity::find()
+                        .filter(
+                            consent_session_scopes::COLUMN
+                                .consent_session_id
+                                .eq(model.id),
+                        )
+                        .all(txn)
+                        .await
+                        .map_err(|_| CoreError::InternalServerError)?;
+
+                    Ok(into_domain(model, scopes))
+                })
+            })
             .await
-            .map_err(|_| CoreError::InternalServerError)?;
-
-        let model = consent_sessions::Entity::insert(payload)
-            .on_conflict(
-                OnConflict::columns([
-                    consent_sessions::COLUMN.realm_id,
-                    consent_sessions::COLUMN.user_id,
-                    consent_sessions::COLUMN.client_id,
-                ])
-                .update_columns([
-                    consent_sessions::COLUMN.expires_at,
-                    consent_sessions::COLUMN.updated_at,
-                ])
-                .to_owned(),
-            )
-            .exec_with_returning(&transaction)
-            .await
-            .map_err(|_| CoreError::InternalServerError)?;
-
-        consent_session_scopes::Entity::delete_many()
-            .filter(
-                consent_session_scopes::COLUMN
-                    .consent_session_id
-                    .eq(model.id),
-            )
-            .exec(&transaction)
-            .await
-            .map_err(|_| CoreError::InternalServerError)?;
-
-        let rows = scope_rows(model.id, &decision);
-        if !rows.is_empty() {
-            consent_session_scopes::Entity::insert_many(rows)
-                .exec(&transaction)
-                .await
-                .map_err(|_| CoreError::InternalServerError)?;
-        }
-
-        let scopes = consent_session_scopes::Entity::find()
-            .filter(
-                consent_session_scopes::COLUMN
-                    .consent_session_id
-                    .eq(model.id),
-            )
-            .all(&transaction)
-            .await
-            .map_err(|_| CoreError::InternalServerError)?;
-
-        transaction
-            .commit()
-            .await
-            .map_err(|_| CoreError::InternalServerError)?;
-
-        Ok(into_domain(model, scopes))
+            .map_err(|e| map_transaction_error(e, |_| CoreError::InternalServerError))
     }
 
     async fn get_consent_ttl_days(&self, realm_id: RealmId) -> Result<Option<i32>, CoreError> {

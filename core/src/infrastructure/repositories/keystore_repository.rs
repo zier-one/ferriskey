@@ -24,6 +24,7 @@ use crate::domain::{
     jwt::{JwtError, entities::JwtKeyPair},
 };
 use crate::entity::{jwt_keys, realms};
+use crate::infrastructure::common::map_transaction_error;
 use crate::infrastructure::token_state::TokenState;
 
 pub const PRIVATE_KEY_PURPOSE: &str = "jwt_keys.private_key";
@@ -393,28 +394,37 @@ impl SigningKeyRepository for PostgresKeyStoreRepository {
     ) -> Result<SigningKey, JwtError> {
         let realm_id: Uuid = realm_id.into();
         let now = Utc::now();
+        let repository = self.clone();
 
-        let transaction = self.db.begin().await.map_err(storage_error)?;
-        let realm = self.lock_realm(&transaction, realm_id).await?;
+        let signing_key = self
+            .db
+            .transaction::<_, _, JwtError>(|txn| {
+                Box::pin(async move {
+                    let realm = repository.lock_realm(txn, realm_id).await?;
 
-        jwt_keys::Entity::update_many()
-            .col_expr(COLUMN.rotated_at, Expr::value(now.naive_utc()))
-            .col_expr(COLUMN.retire_at, Expr::value((now + grace).naive_utc()))
-            .filter(COLUMN.realm_id.eq(realm_id))
-            .filter(active_key_filter())
-            .exec(&transaction)
+                    jwt_keys::Entity::update_many()
+                        .col_expr(COLUMN.rotated_at, Expr::value(now.naive_utc()))
+                        .col_expr(COLUMN.retire_at, Expr::value((now + grace).naive_utc()))
+                        .filter(COLUMN.realm_id.eq(realm_id))
+                        .filter(active_key_filter())
+                        .exec(txn)
+                        .await
+                        .map_err(storage_error)?;
+
+                    let new_key =
+                        jwt_keys::Entity::insert(repository.new_key(realm_id, &realm.name, now)?)
+                            .exec_with_returning(txn)
+                            .await
+                            .map_err(storage_error)?;
+
+                    Ok(signing_key_of(&new_key, now))
+                })
+            })
             .await
-            .map_err(storage_error)?;
+            .map_err(|e| map_transaction_error(e, storage_error))?;
 
-        let new_key = jwt_keys::Entity::insert(self.new_key(realm_id, &realm.name, now)?)
-            .exec_with_returning(&transaction)
-            .await
-            .map_err(storage_error)?;
-
-        transaction.commit().await.map_err(storage_error)?;
         self.key_set_changed(realm_id);
-
-        Ok(signing_key_of(&new_key, now))
+        Ok(signing_key)
     }
 
     async fn revoke_key(
@@ -424,43 +434,53 @@ impl SigningKeyRepository for PostgresKeyStoreRepository {
     ) -> Result<Option<SigningKey>, JwtError> {
         let realm_id: Uuid = realm_id.into();
         let now = Utc::now();
+        let repository = self.clone();
 
-        let transaction = self.db.begin().await.map_err(storage_error)?;
-        let realm = self.lock_realm(&transaction, realm_id).await?;
+        let (signing_key, changed) = self
+            .db
+            .transaction::<_, _, JwtError>(|txn| {
+                Box::pin(async move {
+                    let realm = repository.lock_realm(txn, realm_id).await?;
 
-        let Some(key) = jwt_keys::Entity::find_by_id(kid)
-            .filter(COLUMN.realm_id.eq(realm_id))
-            .one(&transaction)
+                    let Some(key) = jwt_keys::Entity::find_by_id(kid)
+                        .filter(COLUMN.realm_id.eq(realm_id))
+                        .one(txn)
+                        .await
+                        .map_err(storage_error)?
+                    else {
+                        return Ok((None, false));
+                    };
+
+                    if key.revoked_at.is_some() {
+                        return Ok((Some(signing_key_of(&key, now)), false));
+                    }
+
+                    let revoked = jwt_keys::Entity::update(jwt_keys::ActiveModel {
+                        id: Set(key.id),
+                        revoked_at: Set(Some(now.naive_utc())),
+                        ..Default::default()
+                    })
+                    .exec(txn)
+                    .await
+                    .map_err(storage_error)?;
+
+                    if key.rotated_at.is_none() {
+                        jwt_keys::Entity::insert(repository.new_key(realm_id, &realm.name, now)?)
+                            .exec_without_returning(txn)
+                            .await
+                            .map_err(storage_error)?;
+                    }
+
+                    Ok((Some(signing_key_of(&revoked, now)), true))
+                })
+            })
             .await
-            .map_err(storage_error)?
-        else {
-            return Ok(None);
-        };
+            .map_err(|e| map_transaction_error(e, storage_error))?;
 
-        if key.revoked_at.is_some() {
-            return Ok(Some(signing_key_of(&key, now)));
+        if changed {
+            self.key_set_changed(realm_id);
         }
-
-        let revoked = jwt_keys::Entity::update(jwt_keys::ActiveModel {
-            id: Set(key.id),
-            revoked_at: Set(Some(now.naive_utc())),
-            ..Default::default()
-        })
-        .exec(&transaction)
-        .await
-        .map_err(storage_error)?;
-
-        if key.rotated_at.is_none() {
-            jwt_keys::Entity::insert(self.new_key(realm_id, &realm.name, now)?)
-                .exec_without_returning(&transaction)
-                .await
-                .map_err(storage_error)?;
-        }
-
-        transaction.commit().await.map_err(storage_error)?;
-        self.key_set_changed(realm_id);
-
-        Ok(Some(signing_key_of(&revoked, now)))
+        Ok(signing_key)
     }
 }
 

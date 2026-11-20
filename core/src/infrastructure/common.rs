@@ -19,6 +19,18 @@ pub fn is_unique_violation(error: &sea_orm::DbErr) -> bool {
     )
 }
 
+/// Unwraps a closure transaction result while leaving connection/commit failures
+/// to the caller's existing error mapping.
+pub fn map_transaction_error<E>(
+    error: sea_orm::TransactionError<E>,
+    connection_error: impl FnOnce(sea_orm::DbErr) -> E,
+) -> E {
+    match error {
+        sea_orm::TransactionError::Transaction(error) => error,
+        sea_orm::TransactionError::Connection(error) => connection_error(error),
+    }
+}
+
 pub const DEFAULT_CACHE_CAPACITY: u64 = 10_000;
 pub const LONGEST_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
