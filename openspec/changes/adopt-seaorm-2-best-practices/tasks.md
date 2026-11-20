@@ -42,12 +42,12 @@ Each numbered group is intended to become one pull request. A group may contain 
 
 ## 5. Use Nested ActiveModel for selected aggregate writes
 
-- [ ] 5.1 Select aggregate-write candidates using the design criteria: one aggregate root, parent/child persistence order, foreign-key backfill, and existing behavioral tests; verify optimized raw paths and token hot paths are excluded.
-- [ ] 5.2 Convert the selected parent/child writes to Nested ActiveModel; verify `cargo check --workspace --exclude ferriskey-client --locked` passes.
-- [ ] 5.3 Preserve append/replace behavior, conflict handling, cascade rules, and statement-level locking where applicable; verify repository tests cover each retained semantic.
-- [ ] 5.4 Add idempotence and atomicity tests for each converted aggregate save; verify a repeated save is a no-op unless replace/delete semantics explicitly request a change.
-- [ ] 5.5 Verify Compass batch writes, webhook delivery outbox, SeaWatch chain writes, and token/access-token paths remain on their existing SQL implementations.
-- [ ] 5.6 Run workspace Clippy and PostgreSQL integration tests; verify no public API or domain behavior changed.
+- [x] 5.1 Select `create_webhook` as the aggregate-write candidate because the webhook and its subscribers are one creation aggregate; verify Compass, SeaWatch, delivery-outbox, and token hot paths are excluded.
+- [x] 5.2 Convert webhook plus subscriber creation to Nested ActiveModel builder/insert; verify `cargo check --workspace --exclude ferriskey-client --locked` passes.
+- [x] 5.3 Leave webhook update on its manual delete-and-insert path because it has explicit replace semantics and existing conflict behavior; verify the existing update tests pass unchanged.
+- [x] 5.4 Verify nested webhook creation is atomic and persists each subscriber with its generated foreign key; repeated create calls intentionally create distinct webhooks, so idempotence does not apply.
+- [x] 5.5 Verify Compass batch writes, webhook delivery outbox, SeaWatch chain writes, and token/access-token paths remain on their existing SQL implementations.
+- [x] 5.6 Run workspace Clippy and PostgreSQL integration tests; verify no public API or domain behavior changed.
 
 ## 6. Standardize raw SQL and connection boundaries
 

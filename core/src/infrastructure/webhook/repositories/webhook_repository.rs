@@ -26,7 +26,7 @@ use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
-    QueryTrait, RelationTrait, Select,
+    QueryTrait, RelationTrait, Select, TryIntoModel,
 };
 use tokio::sync::mpsc;
 use tracing::{error, warn};
@@ -330,53 +330,47 @@ impl WebhookRepository for PostgresWebhookRepository {
         let subscription_id = Uuid::new_v7(timestamp);
         let headers_json = to_value(headers).unwrap_or_default();
 
-        let mut webhook = WebhookEntity::insert(WebhookActiveModel {
-            id: Set(subscription_id),
-            endpoint: Set(endpoint),
-            headers: Set(headers_json),
-            secret: Set(self.seal_secret(subscription_id, &generate_secret())?),
-            name: Set(name),
-            description: Set(description),
-            realm_id: Set(realm_id.into()),
-            triggered_at: Set(None),
-            last_delivery_status: Set(None),
-            last_delivery_error: Set(None),
-            created_at: Set(Utc::now().naive_utc()),
-            updated_at: Set(Utc::now().naive_utc()),
-            retry_max_attempts: Set(as_column(retry_policy.max_attempts)),
-            retry_base_delay_ms: Set(as_column(retry_policy.base_delay_ms)),
-            retry_max_delay_ms: Set(as_column(retry_policy.max_delay_ms)),
-            retry_max_total_delay_ms: Set(as_column(retry_policy.max_total_delay_ms)),
-        })
-        .exec_with_returning(&self.db)
-        .await
-        .map_err(|e| {
+        let mut webhook = WebhookActiveModel::builder()
+            .set_id(subscription_id)
+            .set_endpoint(endpoint)
+            .set_headers(headers_json)
+            .set_secret(self.seal_secret(subscription_id, &generate_secret())?)
+            .set_name(name)
+            .set_description(description)
+            .set_realm_id(Uuid::from(realm_id))
+            .set_triggered_at(None)
+            .set_last_delivery_status(None)
+            .set_last_delivery_error(None)
+            .set_created_at(Utc::now().naive_utc())
+            .set_updated_at(Utc::now().naive_utc())
+            .set_retry_max_attempts(as_column(retry_policy.max_attempts))
+            .set_retry_base_delay_ms(as_column(retry_policy.base_delay_ms))
+            .set_retry_max_delay_ms(as_column(retry_policy.max_delay_ms))
+            .set_retry_max_total_delay_ms(as_column(retry_policy.max_total_delay_ms));
+
+        for subscriber in subscribers {
+            webhook = webhook.add_webhook_subscriber(
+                WebhookSubscriberActiveModel::builder()
+                    .set_id(Uuid::new_v7(timestamp))
+                    .set_name(subscriber.to_string()),
+            );
+        }
+
+        let webhook = webhook.insert(&self.db).await.map_err(|e| {
             error!("Failed to create webhook: {}", e);
             CoreError::InternalServerError
-        })
-        .and_then(|model| self.webhook_of(model))?;
-
-        let subscribers: Vec<WebhookSubscriber> = if subscribers.is_empty() {
-            Vec::new()
-        } else {
-            let subscribers_model: Vec<WebhookSubscriberModel> =
-                WebhookSubscriberEntity::insert_many(subscribers.iter().map(|value| {
-                    WebhookSubscriberActiveModel {
-                        id: Set(Uuid::new_v7(timestamp)),
-                        name: Set(value.to_string()),
-                        webhook_id: Set(subscription_id),
-                    }
-                }))
-                .exec_with_returning(&self.db)
-                .await
-                .map_err(|_| CoreError::InternalServerError)?;
-
-            subscribers_model
-                .iter()
-                .map(|value| value.clone().try_into())
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|_| CoreError::InternalServerError)?
-        };
+        })?;
+        let webhook = webhook
+            .try_into_model()
+            .map_err(|_| CoreError::InternalServerError)?;
+        let subscribers = webhook
+            .webhook_subscribers
+            .iter()
+            .cloned()
+            .map(|value| WebhookSubscriber::try_from(WebhookSubscriberModel::from(value)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| CoreError::InternalServerError)?;
+        let mut webhook = self.webhook_of(WebhookModel::from(webhook))?;
 
         webhook.subscribers = subscribers;
         Ok(webhook)
