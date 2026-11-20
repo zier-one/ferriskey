@@ -195,26 +195,22 @@ impl RoleRepository for PostgresRoleRepository {
     }
 
     async fn get_by_id(&self, id: Uuid) -> Result<Option<Unscoped<Role>>, CoreError> {
-        let roles_with_clients = crate::entity::roles::Entity::find()
+        let role_with_client = crate::entity::roles::Entity::load()
             .filter(roles::COLUMN.id.eq(id))
-            .find_with_related(crate::entity::clients::Entity)
-            .all(&self.db)
+            .with(crate::entity::clients::Entity)
+            .one(&self.db)
             .await
             .map_err(|_| CoreError::InternalServerError)?;
 
-        if roles_with_clients.is_empty() {
-            return Ok(None);
-        }
-
-        let (role_model, related_clients) = &roles_with_clients[0];
-        let mut role: Role = role_model.clone().into();
-
-        // Only set client if it exists
-        if let Some(client_model) = related_clients.first() {
-            role.client = Some(client_model.clone().into());
-        }
-
-        Ok(Some(Unscoped::new(role)))
+        Ok(role_with_client.map(|role_with_client| {
+            let client = role_with_client
+                .clients
+                .as_ref()
+                .map(|client| clients::Model::from(client.clone()).into());
+            let mut role: Role = roles::Model::from(role_with_client).into();
+            role.client = client;
+            Unscoped::new(role)
+        }))
     }
 
     async fn delete_by_id(&self, role: &Scoped<Role>) -> Result<(), CoreError> {

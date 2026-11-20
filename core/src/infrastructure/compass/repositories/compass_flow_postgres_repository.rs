@@ -252,22 +252,29 @@ impl CompassFlowRepository for PostgresCompassFlowRepository {
         &self,
         flow_id: Uuid,
     ) -> Result<Option<Unscoped<CompassFlow>>, CoreError> {
-        let result = compass_flows::Entity::find_by_id(flow_id)
-            .find_with_related(compass_flow_steps::Entity)
-            .all(&self.db)
+        let flow_with_steps = compass_flows::Entity::load()
+            .filter(compass_flows::COLUMN.id.eq(flow_id))
+            .with(compass_flow_steps::Entity)
+            .one(&self.db)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to get compass flow by id: {}", e);
                 CoreError::InternalServerError
             })?;
 
-        let flow = result.into_iter().next().map(|(flow_model, step_models)| {
-            let mut flow: CompassFlow = flow_model.into();
-            flow.steps = step_models.into_iter().map(|s| s.into()).collect();
+        Ok(flow_with_steps.map(|flow_with_steps| {
+            let mut step_models = flow_with_steps
+                .compass_flow_steps
+                .iter()
+                .cloned()
+                .map(compass_flow_steps::Model::from)
+                .collect::<Vec<_>>();
+            step_models.sort_by_key(|step| (step.started_at, step.id));
+            let steps = step_models.into_iter().map(CompassFlowStep::from).collect();
+            let mut flow: CompassFlow = compass_flows::Model::from(flow_with_steps).into();
+            flow.steps = steps;
             Unscoped::new(flow)
-        });
-
-        Ok(flow)
+        }))
     }
 
     async fn purge_old_flows(&self, older_than: DateTime<Utc>) -> Result<u64, CoreError> {

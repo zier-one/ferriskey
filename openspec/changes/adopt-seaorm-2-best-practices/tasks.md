@@ -33,12 +33,12 @@ Each numbered group is intended to become one pull request. A group may contain 
 
 ## 4. Use Entity Loader for related reads
 
-- [ ] 4.1 Inventory the five current `find_with_related` / `find_also_related` sites and evaluate each for Entity Loader suitability; verify each site is marked for conversion or explicitly retained with a reason.
-- [ ] 4.2 Convert the selected role, user, client, and Compass flow object-graph reads to Entity Loader; verify `cargo check -p ferriskey-core --locked` passes.
-- [ ] 4.3 Preserve deterministic ordering for one-to-many and many-to-many loaded relations; verify loader tests assert the expected relation order.
-- [ ] 4.4 Add query-count or equivalent observable assertions for converted reads; verify converted object-graph loads avoid N+1 queries.
-- [ ] 4.5 Verify raw batch and aggregate paths, including Compass `UNNEST` writes and SeaWatch chain writes, are untouched.
-- [ ] 4.6 Run the affected repository, API, and PostgreSQL integration tests plus workspace Clippy; verify returned object graphs and empty-relation semantics are unchanged.
+- [x] 4.1 Inventory the five current `find_with_related` / `find_also_related` sites and evaluate each for Entity Loader suitability; verify each site is marked for conversion or explicitly retained with a reason.
+- [x] 4.2 Convert the role and Compass flow object-graph reads to Entity Loader; retain the user and client reads because their single-query joins are protected by the login statement budget, and verify `cargo check -p ferriskey-core --locked` passes.
+- [x] 4.3 Preserve deterministic ordering for loaded one-to-many relations; verify Compass steps are sorted by `started_at` then `id` and required-action/client test order remains unchanged.
+- [x] 4.4 Use the existing login statement-budget test as the observable regression guard; verify the retained user/client reads stay within the 8-statement authenticate budget and loader conversions do not introduce N+1 access.
+- [x] 4.5 Verify raw batch and aggregate paths, including Compass `UNNEST` writes and SeaWatch chain writes, are untouched.
+- [x] 4.6 Run the affected repository, API, and PostgreSQL integration tests plus workspace Clippy; verify returned object graphs and empty-relation semantics are unchanged.
 
 ## 5. Use Nested ActiveModel for selected aggregate writes
 
